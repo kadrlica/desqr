@@ -5,6 +5,8 @@ from os.path import join, basename
 import glob
 from termcolor import colored as color
 import logging
+from multiprocessing import Pool
+from multiprocessing import Process, Value, Lock
 
 import yaml
 import fitsio
@@ -16,6 +18,13 @@ from utils import bfields
 SECTIONS = ['download','pixelize','zeropoint','match','catalog']
 OK  = color('OK','green')
 BAD = color('BAD','red')
+   
+def bad_values_str(values):
+    opts = np.get_printoptions()
+    np.set_printoptions(precision=5,threshold=25,edgeitems=5)
+    ret = repr(values)
+    np.set_printoptions(**opts)
+    return ret
 
 def print_running(idx,total,indent=0,step=10):
     """
@@ -27,6 +36,24 @@ def print_running(idx,total,indent=0,step=10):
         sys.stdout.write("\r%s(%i/%i): "%(idt,i,total))
         sys.stdout.flush()
 
+def print_wheel(idx,total,indent=0,step=10):
+    i = idx
+    idt = indent*' '
+    if 0 <= i % 10 <= 1: sys.stdout.write("\r%s(*): "%(idt))
+    if 2 <= i % 10 <= 3: sys.stdout.write("\r%s(-): "%(idt))
+    if 4 <= i % 10 <= 5: sys.stdout.write("\r%s(\): "%(idt))
+    if 6 <= i % 10 <= 7: sys.stdout.write("\r%s(|): "%(idt))
+    if 8 <= i % 10 <= 9: sys.stdout.write("\r%s(/): "%(idt))
+    sys.stdout.flush()
+
+def print_points(idx,total,indent=0,step=10):
+    i = idx
+    idt = indent*' '
+    n = i % 10
+    sys.stdout.write("\r%s(%-9s): "%(idt,n*'.'))
+    sys.stdout.flush()
+
+
 def dir_exists(dirname):
     if not os.path.exists(dirname):
         msg = "No directory:"
@@ -35,6 +62,49 @@ def dir_exists(dirname):
         return False
     return True
     
+def count_objects(args):
+    i,nfiles,f,band = args
+    print_running(i+1,nfiles,indent=4,step=1)
+
+    fits = fitsio.FITS(f,'r')
+    num = fits[1].get_nrows()
+    fits.close()
+
+    if (band=='Y' and num < 5e3) or (band!='Y' and num < 1e4):
+        msg = "Only %i objects in %s"%(num,f)
+        print color(msg,'yellow')
+
+    return num
+
+def check_ra(args):
+    i,nfiles,f,band = args
+    print_running(i+1,nfiles,indent=4,step=1)
+
+    ra = fitsio.read(f,columns='RA')
+
+    bad = False
+    sel = ( (ra<0) | (ra>360) )
+    if np.any(sel):
+        msg = "Bad RA value in %s"%f
+        print color(msg,'red')
+        print 4*' '+bad_values_str(ra[sel])
+        bad = True
+    return bad
+
+def check_fluxes(args):
+    i,nfiles,f,band = args
+    print_running(i+1,nfiles,indent=4,step=1)
+
+    auto = fitsio.read(f,columns='FLUX_AUTO')
+
+    bad = False
+    sel = ((auto < 0) | (auto > 1e9))
+    if np.any(sel):
+        msg = "Bad FLUX_AUTO value in %s"%f
+        print color(msg,'red')
+        print 4*' '+bad_values_str(auto[sel])
+        bad = True
+    return bad
 
 if __name__ == "__main__":
     import argparse
@@ -80,9 +150,10 @@ if __name__ == "__main__":
 
                 print "  Filenames: "
                 exp = np.recfromcsv(config['explist'])
+                exp = exp[exp['band']==band]
                 unit = np.array([basename(f).split('_')[0] for f in files])
-                missing = ~np.in1d(exp['unitname'][exp['band']==band],unit)
-                extra = ~np.in1d(unit,exp['unitname'][exp['band']==band])
+                missing = ~np.in1d(exp['unitname'],unit)
+                extra = ~np.in1d(unit,exp['unitname'])
 
                 print_running(nfiles,nfiles,indent=4)
                 if missing.sum():
@@ -96,39 +167,21 @@ if __name__ == "__main__":
                 else: print OK
                 
                 RAWCOUNT = 0
-                print "  Objects:"
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
-                    fits = fitsio.FITS(f,'r')
-                    num = fits[1].get_nrows()
-                    ra = fits[1].read(columns='RA')
-                    RAWCOUNT += num
-                    bad = False
-                    if num < 1e4:
-                        msg = "Found %i objects in %s"%(num,f)
-                        print color(msg,'yellow')
-                        bad = True
-                    elif np.any( (ra<0) | (ra>360) ):
-                        msg = "Bad RA value in %s"%f
-                        print color(msg,'red')
-                        bad = True
-                    fits.close()
-                if not bad: print OK
-                print 4*' '+"Number of Objects: %i"%RAWCOUNT
+                args = [(i,nfiles,f,band) for i,f in enumerate(files)]
+                p = Pool()
 
+                print 2*' '+"Objects:"
+                out = p.map(count_objects,args)
+                RAWCOUNT = np.sum(out)
+                print RAWCOUNT, OK
+
+                print 2*' '+"RA:"
+                out = p.map(check_ra,args)
+                if not np.any(out): print OK
+                
                 print 2*' '+"Fluxes:"
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
-                    fits = fitsio.FITS(f,'r')
-
-                    auto = fits[1].read(columns='FLUX_AUTO')
-                    sel = ((auto < 0) | (auto > 1e9))
-                    if np.any(sel):
-                        msg = "Bad FLUX_AUTO value in %s"%f
-                        print color(msg,'red')
-                        print 4*' '+str(auto[sel])
-                        bad = True
-                if not bad: print OK
+                out = p.map(check_fluxes,args)
+                if not np.any(out): print OK
 
             ##############################
             if section == 'pixelize':
@@ -267,3 +320,5 @@ if __name__ == "__main__":
                             print 4*' '+'Match fraction = %.2f'%frac
                 if not bad: print OK
                 print 4*' '+"Number of Objects: %i"%CATCOUNT
+                
+                # Check that the dtypes are the same in all of the files

@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=1,type=float)
+    parser.add_argument('-s','--sleep',default=2,type=float)
     parser.add_argument('-q','--queue',default='condor')
     opts = parser.parse_args()
 
@@ -23,13 +23,14 @@ if __name__ == "__main__":
     rawdir = config['rawdir']
     explist = config['explist']
     tags = config.get('tags')
-
+    
     if os.path.exists(explist) and not opts.force:
         print "Found %s; skipping ..."%explist
     else:
-        query = download.exposure_query(program='survey')
+        query = download.exposure_query(tags,program='survey')
         print query
-        download.download(explist,query,force=opts.force)
+        sqlfile = os.path.splitext(explist)[0]+'.sql'
+        download.download(explist,query,sqlfile=sqlfile,force=opts.force)
 
     exposures = np.recfromcsv(explist)
     for band in config['bands']:
@@ -57,8 +58,8 @@ if __name__ == "__main__":
                 submit = "csub -o %s %s"%(logfile,cmd)
             subprocess.call(submit,shell=True)
             time.sleep(opts.sleep)
+
             #break
-        
-        #break
+        break
         #time.sleep(300)
         

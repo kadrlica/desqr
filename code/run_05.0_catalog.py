@@ -41,10 +41,14 @@ if __name__ == "__main__":
             found(outfile)
             continue
 
-        params=(' '.join(infiles),outfile,keyfile,force)
-        cmd = 'catalog.py -v %s -o %s -k %s %s'%params
+        minbands = config.get('minbands')
+        minbands = '--min-bands %s'%minbands if minbands else ''
+        bands = ' '.join(['-b %s'%b for b in config.get('bands',[])])
+        params=(' '.join(infiles),outfile,keyfile,bands,minbands,force)
+        cmd = 'catalog.py -v %s -o %s -k %s %s %s %s'%params
 
         if opts.queue == 'local':
+            print cmd
             submit = cmd
         else:
             submit = 'csub -o %s %s'%(logfile,cmd)

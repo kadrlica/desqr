@@ -7,7 +7,7 @@ import glob
 
 import numpy as np
 import upload
-
+from utils import mkdir
 
 if __name__ == "__main__":
     import argparse
@@ -20,37 +20,30 @@ if __name__ == "__main__":
     opts = parser.parse_args()
 
     force = '-f' if opts.force else ''
+
     config = yaml.load(open(opts.config))
     catdir = config['catdir']
     keydir = config['keydir']
-    table = config['table']
-    index = config['index']
-    logdir = os.path.join('upload')
+    section = config['db']
+    table = config['dbtable']
+    index = config['dbindex']
 
-    #infiles = ['unique/hpx_01313.fits','unique/hpx_01314.fits','unique/hpx_01315.fits']
-    #infiles = ['unique/hpx_02957.fits','unique/hpx_02958.fits','unique/hpx_02959.fits']
-    #infiles = sorted(glob.glob(unidir+'/hpx_0295*.fits'))
+    logdir = mkdir('upload')
 
     ### # Upload the catalog
-    ### infiles = sorted(glob.glob(catdir+'/*.fits'))
-    ### params = (table,force,' '.join(infiles))
-    ### cmd = "upload.py -t %s %s %s"%params
-    ### logfile = os.path.join(logdir,'catalog_upload.log')
-    ### if opts.queue == 'local':
-    ###     submit = "%s > %s"%(cmd,logfile)
-    ### else:
-    ###     submit = "csub -o %s %s"%(logfile,cmd)
-    ### subprocess.call(submit,shell=True)
-    ### time.sleep(1)
+    infiles = sorted(glob.glob(catdir+'/*.fits'))
+    params = (force,table,section,' '.join(infiles))
+    cmd = "upload.py %s -t %s -s %s %s"%params
+    logfile = os.path.join(logdir,'catalog_upload.log')
+    submit = 'csub -o %s -u %s "%s"'%(logfile,opts.queue,cmd)
+    subprocess.call(submit,shell=True)
+    time.sleep(1)
 
     # Upload the keys
     infiles = sorted(glob.glob(keydir+'/*.fits'))
-    params = (index,force,' '.join(infiles))
-    cmd = "upload.py -t %s %s %s"%params
+    params = (force,index,section,' '.join(infiles))
+    cmd = "upload.py %s -t %s -s %s %s"%params
     logfile = os.path.join(logdir,'index_upload.log')
-    if opts.queue == 'local':
-        submit = "%s >  %s"%(cmd,logfile)
-    else:
-        submit = "csub -o %s %s"%(logfile,cmd)
+    submit = 'csub -o %s -u %s "%s"'%(logfile,opts.queue,cmd)
     subprocess.call(submit,shell=True)
     time.sleep(1)

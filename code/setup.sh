@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 
 astrosetup
-eupssetup
 
+cvmfssetup
+setup pyyaml
+setup basemap
+setup pyfits 3.3+1
 setup fitsio 0.9.6+1
 setup astropy 0.4.2+1
 setup easyaccess 1.1.0+1
+setup healpy 1.8.1+3
 setup python 2.7.6+3
 setup matplotlib 1.3.1+3
 
@@ -25,8 +29,9 @@ export PATH=$PATH:$SCIRELEASE/users/kadrlica/catalog_coadd/code
 export PYTHONPATH=$PYTHONPATH:$SCIRELEASE/users/kadrlica/catalog_coadd/code
 export PYTHONPATH=$PYTHONPATH:$SOFTWARE/ugali/master
 
-export PATH=$SOFTWARE/easyaccess:$PATH
+export PATH=$SOFTWARE/easyaccess/bin:$PATH
 export PYTHONPATH=$SOFTWARE/easyaccess:$PYTHONPATH
 
-export PATH=$SOFTWARE/desdb/desdb/bin:$PATH
-export PYTHONPATH=$SOFTWARE/desdb:$PYTHONPATH
+export MAGLITES=$SOFTWARE/maglites/master
+export PATH=$MAGLITES/bin:$PATH
+export PYTHONPATH=$MAGLITES:$PYTHONPATH

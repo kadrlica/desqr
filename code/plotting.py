@@ -73,10 +73,14 @@ def draw_footprint(skymap,proj='car',**kwargs):
 
     nside = healpy.npix2nside(len(skymap))
 
-    #xmin,xmax = -70,110
-    #ymin,ymax = -70,10
-    xmin,xmax = 30,180
-    ymin,ymax = -80,-50
+    xmin,xmax = -70,110
+    ymin,ymax = -70,10
+    # desgw
+    #xmin,xmax = 30,180
+    #ymin,ymax = -80,-50
+    # maglites
+    xmin,xmax = 80,280
+    ymin,ymax = -90,-50
 
     delta = 0.1
     xx,yy = np.meshgrid(np.arange(xmin,xmax,delta),np.arange(ymin,ymax,delta))
@@ -88,8 +92,8 @@ def draw_footprint(skymap,proj='car',**kwargs):
     ax.set_ylabel('DEC (deg)')
     #ax.set_xticks([90,60,30,0,-30,-60])
     #ax.set_yticks([-70,-50,-30,-10,10])
-    ax.set_xticks(np.arange(180,-180-30,-30))
-    ax.set_yticks(np.arange(-90,90+20,20))
+    #ax.set_xticks(np.arange(180,-180-30,-30))
+    #ax.set_yticks(np.arange(-90,90+20,20))
     ax.set_xlim(xmax,xmin)
     ax.set_ylim(ymin,ymax)
     ax.grid()

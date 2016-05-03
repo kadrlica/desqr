@@ -99,7 +99,7 @@ def write(filename,data,header=None,force=False):
     fitsio.write(filename,data,header=header,clobber=force)
 
 def insert_columns(filename,data,ext=1,force=False):
-    print filename
+    logger.info(filename)
     fits = fitsio.FITS(filename,'rw')
     names = fits[ext].get_colnames()
     overlap = np.in1d(data.dtype.names,names)

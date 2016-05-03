@@ -15,14 +15,13 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=5,type=float)
     parser.add_argument('-q','--queue',default='condor')
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
-    config = yaml.load(open(opts.config))
+    config = yaml.load(open(args.config))
     hpxdir = config['hpxdir']
     zpfile = config['zpfile']
     blfile = config['blfile']
-    blacklist = '-b %s'%blfile if blfile is not None else ''
-    force = '-f' if opts.force else ''
+    ebv    = config.get('ebv',None)
 
     for band in config['bands']:
         indir = os.path.join(hpxdir,band)
@@ -31,14 +30,21 @@ if __name__ == "__main__":
         for infile in infiles:
             logbase = ('zp_'+os.path.basename(infile)).replace('.fits','.log')     
             logfile = os.path.join(logdir,logbase)
+            params = dict(infile=infile,zpfile=zpfile,
+                          blacklist = '-b %s'%blfile if blfile else '',
+                          extinction = '-e %s'%ebv if ebv else '',
+                          force = '-f' if args.force else '')
+            
+            cmd = 'zeropoint.py %(force)s %(infile)s %(zpfile)s %(blacklist)s'%params
+            if ebv:
+                cmd += "; extinction.py %(force)s %(infile)s %(extinction)s"%params
 
-            cmd = 'zeropoint.py %s %s %s %s'%(infile,zpfile,blacklist,force)
-
-            if opts.queue == 'local':
+            if args.queue == 'local':
+                print cmd
                 submit = cmd
             else:
-                submit = 'csub -o %s %s'%(logfile,cmd)
+                submit = 'csub -o %s "%s"'%(logfile,cmd)
             subprocess.call(submit,shell=True)
-            time.sleep(opts.sleep)
-        if opts.queue != 'local': time.sleep(10)
+            time.sleep(args.sleep)
+        if args.queue != 'local': time.sleep(5)
             

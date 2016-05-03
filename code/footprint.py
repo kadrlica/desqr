@@ -20,7 +20,8 @@ import plotting
 
 # Coverage Footprint
 
-COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)
+#COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)
+COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)+bfields('NEPOCHS',BANDS)
 
 def empty(nside): 
     return np.zeros(healpy.nside2npix(nside),dtype=int)
@@ -58,13 +59,13 @@ if __name__ == "__main__":
 
     skymaps = [
         ['any'  ,sel_all  ],
-        #['g'    ,sel_g    ],
-        #['r'    ,sel_r    ],
-        ['i'    ,sel_i    ],
-        ['z'    ,sel_z    ],
+        ['g'    ,sel_g    ],
+        ['r'    ,sel_r    ],
+        #['i'    ,sel_i    ],
+        #['z'    ,sel_z    ],
         #['Y'    ,sel_Y    ],
-        #['gr'   ,sel_gr   ],
-        ['iz'   ,sel_iz   ],
+        ['gr'   ,sel_gr   ],
+        #['iz'   ,sel_iz   ],
         #['all',sel_grizY],
         ]
 
@@ -75,6 +76,7 @@ if __name__ == "__main__":
     for f in infiles:
         if opts.verbose: print f
         data = fitsio.read(f,columns=COLUMNS)
+        #data = data[(data['NEPOCHS_G'] == 1)]
         pixels = ang2pix(nside,data['RA'],data['DEC'])
         for name,sel,counts in skymaps:
             s = sel(data)
@@ -95,14 +97,14 @@ if __name__ == "__main__":
         im = plotting.draw_footprint(skymap,cmap='jet')
         plt.colorbar(im,label=r'$\log_{10}({\rm Density}\ [\deg^{-2}])$')
         #plt.text(-15,-15,r'${\rm Area} = %.0f\ \deg^2$'%area,fontsize=16)
-        plt.title("Y2Q1 Coverage (%s)"%name)
-        outfile = join(plotdir,'y2q1_footprint_%s_n%i_car.png'%(name,nside))
+        plt.title("Coverage (%s)"%name)
+        outfile = join(plotdir,'footprint_%s_n%i_car.png'%(name,nside))
         print "Writing %s..."%outfile
         plt.savefig(outfile,bbox_inches='tight')
         out['map'] = os.path.basename(outfile)
-        outfile = join(plotdir,'y2q1_footprint_%s_n%i_equ.fits'%(name,nside))
+        outfile = join(plotdir,'footprint_%s_n%i_equ.fits'%(name,nside))
         print "Writing %s..."%outfile
-        #healpy.write_map(outfile,skymap.data,dtype=int)
+        healpy.write_map(outfile,skymap.data,dtype=int)
         outstr += template%out
      
     print outstr

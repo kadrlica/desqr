@@ -12,10 +12,8 @@ import utils
 from const import ZEROSTR,OBJECT_ID
 
 from ugali.utils.logger import logger
-#from ugali.utils.projector import match
 import ugali.utils.projector as proj
 
-#MATCHCOLS = ['EXPNUM','T_EFF','RA','DEC']
 MATCHCOLS = ['RA','DEC']
 
 ### def projector2(lon,lat):

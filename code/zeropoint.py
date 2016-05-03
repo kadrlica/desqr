@@ -5,21 +5,23 @@ Utilities for calculating magnitudes from zeropoints.
 import os,shutil
 from os.path import splitext
 import glob
+from collections import OrderedDict as odict
 import numpy as np
 np.seterr(divide='ignore')
 import fitsio
 
 from ugali.utils.logger import logger
 import utils
-from const import BADMAG,BADQSLR
+from const import BADMAG,BADZP
 
 DATACOLS = ['EXPNUM','CCDNUM','FLUX_PSF','FLUXERR_PSF','FLUX_AUTO','FLUXERR_AUTO']
-ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','QSLR_FLAG']
-OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','QSLR_FLAG']
- 
+ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','ZP_FLAG']
+OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','ZP_FLAG']
+
 def calc_mag(flux,zeropoint):
     mag = -2.5 * np.log10(flux) + zeropoint
     mag[~np.isfinite(mag)] = BADMAG
+    mag[(zeropoint>90)|(zeropoint<0)] = BADMAG
     return mag
 
 def calc_magerr(flux,fluxerr):
@@ -46,9 +48,9 @@ def read_zeropoint(zeropoint,blacklist=None):
         logger.warning(msg)
     # reject CCDs with QSLR_FLAGS > 0
 
-    sel_flags = (zp['QSLR_FLAG'] == 0)
+    sel_flags = (zp['ZP_FLAG'] == 0)
     if (~sel_flags).sum():
-        msg = "Found %i CCDs with bad qSLR flags."%(~sel_flags).sum()
+        msg = "Found %i CCDs with bad ZP flags."%(~sel_flags).sum()
         logger.warning(msg)
 
     sel = sel_zero & sel_flags
@@ -73,9 +75,9 @@ def read_zeropoint(zeropoint,blacklist=None):
         return zp[~idx]
 
 def zeropoint(data,zp):
-    out = np.recarray(len(data),dtype=[(n,float) for n in OUTCOLS])
+    out = np.recarray(len(data),dtype=[(n,'f4') for n in OUTCOLS])
     out.fill(BADMAG)
-    out['QSLR_FLAG'].fill(BADQSLR)
+    out['ZP_FLAG'].fill(BADZP)
 
     for expnum in np.unique(data['EXPNUM']):
         zidx = np.where(zp['EXPNUM'] == expnum)[0]
@@ -99,9 +101,9 @@ def zeropoint(data,zp):
         for x in ['PSF','AUTO']:
             out['MAG_'+x][didx] = calc_mag(d['FLUX_'+x],z['MAG_ZERO'][cidx])
             out['MAGERR_'+x][didx] = calc_magerr(d['FLUX_'+x],d['FLUXERR_'+x])
-        out['QSLR_FLAG'][didx] = z['QSLR_FLAG'][cidx]
+        out['ZP_FLAG'][didx] = z['ZP_FLAG'][cidx]
         out['MAG_ZERO'][didx] = z['MAG_ZERO'][cidx]
-      
+
     return out
 
 if __name__ == "__main__":
@@ -112,14 +114,15 @@ if __name__ == "__main__":
     parser.add_argument('zpfile')
     parser.add_argument('-b','--blacklist',default=None)
     parser.add_argument('-f','--force',action='store_true')
-    opts = parser.parse_args()
 
-    logger.info("Reading %s..."%opts.infile)
-    data = fitsio.read(opts.infile,ext=1,columns=DATACOLS)
-    zp = read_zeropoint(opts.zpfile,opts.blacklist)
-    logger.info("Applying zeropoints %s..."%opts.zpfile)
+    args = parser.parse_args()
+
+    logger.info("Reading %s..."%args.infile)
+    data = fitsio.read(args.infile,ext=1,columns=DATACOLS)
+    zp = read_zeropoint(args.zpfile,args.blacklist)
+    logger.info("Applying zeropoints %s..."%args.zpfile)
     out = zeropoint(data,zp)
 
     # Writing...
-    logger.info("Writing %s..."%opts.infile)
-    utils.insert_columns(opts.infile,out,force=opts.force)
+    logger.info("Writing %s..."%args.infile)
+    utils.insert_columns(args.infile,out,force=args.force)

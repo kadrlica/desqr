@@ -9,7 +9,8 @@ import numpy as np
 import numpy.lib.recfunctions as recfuncs
 import healpy
 
-from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES, MINBANDS
+from const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
+from const import BADMAG
 import utils
 from utils import bfields, load_infiles
 from pixelize import ang2pix
@@ -33,8 +34,9 @@ FLAGS = ['FLAGS']
 NEPOCHS = ['NEPOCHS']
 TEFF = ['T_EFF']
 EXPNUM = ['EXPNUM','CCDNUM']
-BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF
+EXTINCTION = ['EXTINCTION']
 
+BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + EXTINCTION
 INPUT_COLS = IDX + [BAND] + COORDS + BEST
 
 # Output columns
@@ -57,18 +59,19 @@ OUTPUT_COLS = odict(
     + [(c,('f8',np.nan)) for c in COORDS]
     + [(i,('i8',-1)) for i in HEALPIX]
     + [(f,('i2',0)) for f in bfields(NEPOCHS,BANDS)]
-    + [(f,('f8',99.0)) for f in bfields(MAGS,BANDS)]
+    + [(f,('f4',BADMAG)) for f in bfields(MAGS,BANDS)]
     + [(f,('f4',-1)) for f in bfields(SPREAD[:1],BANDS)]
     + [(f,('f4',1)) for f in bfields(SPREAD[1:],BANDS)]
     + [(f,('f4',-1)) for f in bfields(CLASS,BANDS)]
     + [(f,('i2',99)) for f in bfields(FLAGS,BANDS)]
-    + [(f,('f8',99.0)) for f in bfields(WAVGMAGS,BANDS)]
+    + [(f,('f4',BADMAG)) for f in bfields(WAVGMAGS,BANDS)]
     + [(f,('f4',-1)) for f in bfields(WAVGSPREAD[:1],BANDS)]
     + [(f,('f4',1)) for f in bfields(WAVGSPREAD[1:],BANDS)]
     #+ [(f,('f4',-1)) for f in bfields(WAVGCLASS,BANDS)] # Y2Q1
     + [(f,('i2',99)) for f in bfields(WAVGFLAGS,BANDS)]
     + [(f,('i4',-1)) for f in bfields(EXPNUM,BANDS)]
     + [(f,('f4',-1)) for f in bfields(TEFF,BANDS)]
+    + [(f,('f4',-1)) for f in bfields(EXTINCTION,BANDS)]
     )
 
 def verbose(func):
@@ -154,6 +157,8 @@ def coadd_coords(lon,lat,labels=None,index=None):
     #z_std = nd.standard_deviation(z,labels=labels,index=index)
     
     lon_out, lat_out = healpy.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
+
+    # What about adding a dispersion?
 
     return lon_out % 360.,lat_out
 
@@ -251,6 +256,11 @@ def coadd_objects(data):
 
     keys = copy.copy(data[IDX+EXPNUM])
     keys = recfuncs.rec_append_fields(keys,UNIQUE_ID,-np.ones(len(keys)),dtypes='>i8')
+    # OBJECT_NUMBER has a different meaning (and type) in Y1A1 and Y2N.
+    # Standardize it here (wouldn't be necessary if done on download).
+    # ADW: Is this working properly?
+    if not keys.dtype['OBJECT_NUMBER'] is not np.dtype('>i8'):
+        keys['OBJECT_NUMBER'] = keys['OBJECT_NUMBER'].astype('>i8')
 
     x = coadd_coords(data['RA'],data['DEC'],data[OBJECT_ID],index=unique_ids)
     for i,f in enumerate(COORDS):
@@ -315,19 +325,41 @@ def coadd_objects(data):
     return cat,keys
 
 def good_objects(data):
+    """
+    Remove spurious single epoch detections.
+
+    Cuts are made on:
+    - 0 < MAG[ERR] < 99
+    - -99 < SPREAD_MODEL < 99
+    - 0 < SPREADERR_MODEL < 99
+    - FLAGS < 4
+
+    Parameters:
+    -----------
+    data : Input single epoch catalog
+
+    Returns:
+    --------
+    data : Single epoch catalog with bad objecs removed.
+    """
     nobjs = len(data)
     sel = np.ones(nobjs,dtype=bool)
 
-    # Only calibrated objects with good magnitudes (not 0 or BADMAG)
+    # Only calibrated objects with 0 < MAG < BADMAG where 
+    # MAG = MAG[ERR]_[PSF/AUTO] 
+    # (There are a small number of spurious measurements with MAG > BADMAG)
     mags = data[MAGS]
     dtype = mags.dtype[0].str
-    sel &= np.all(mags.view(dtype).reshape((nobjs,-1))!=BADMAG,axis=1)
+    sel &= np.all(mags.view(dtype).reshape((nobjs,-1))<BADMAG,axis=1)
     sel &= np.all(mags.view(dtype).reshape((nobjs,-1))>0,axis=1)
 
-    # Objects with spreaderr > 0
-    sel &= (data['SPREADERR_MODEL']>0)
 
-    # Only objects without bad SEXtractor flags
+    # Objects with valid spread_model and spreaderr values
+    # 99 is chosen as the max of NUMBER(7,5) data type
+    sel &= (data['SPREAD_MODEL']>-99) & (data['SPREAD_MODEL']<99)
+    sel &= (data['SPREADERR_MODEL']>0) & (data['SPREADERR_MODEL']<99)
+
+    # Only objects without bad SExtractor flags
     sel &= (data['FLAGS'] < 4)
     #flags = data[['FLAGS']]
     #dtype = flags.dtype[0].str
@@ -343,8 +375,10 @@ def quality_cuts(cat,key=None):
     sel = np.zeros(nobjs,dtype=bool)
 
     # Objects with detections in the minimum number of bands.
-    # Careful with this, the 'view' is dangerous...
-    mags = cat[bfields(['MAG_PSF'],BANDS)].view(np.float).reshape((cat.size,-1))
+    # Careful with this, the 'view' can be dangerous...
+    columns = bfields(['MAG_PSF'],BANDS)
+    dtype = cat.dtype[columns[0]]
+    mags = cat[columns].view(dtype).reshape((cat.size,-1))
     sel |= (np.sum(mags < BADMAG,axis=1) >= MINBANDS)
     
     """
@@ -369,8 +403,16 @@ def quality_cuts(cat,key=None):
         return cat[sel],key[ksel]
 
 def check_keys(cat,key):
+    """
+    Check the number of non-unique objects against the number of
+    measured magnitudes.
+    """
     nkey = (keys['UNIQUE_ID'] >0).sum()
-    ncat = (cat[bfields('MAG_PSF',BANDS)].view('<f8').reshape(len(cat),-1) < 90).sum()
+
+    columns = bfields(['MAG_PSF'],BANDS)
+    dtype = cat.dtype[columns[0]]
+    ncat = (cat[columns].view(dtype).reshape(len(cat),-1) < 90).sum()
+
     if ncat != nkey:
         msg = "Number of keys does not match catalog"
         raise ValueError(msg)
@@ -387,9 +429,17 @@ if __name__ == "__main__":
     parser.add_argument('-k','--keyfile')
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-v','--verbose',action='store_true')
+    parser.add_argument('-b','--bands',default=None,action='append')
+    parser.add_argument('--min-bands',default=None,type=int)
     opts = parser.parse_args()
 
     if vars(opts).get('verbose'): logger.setLevel(logger.DEBUG)
+    if opts.bands: BANDS = opts.bands
+    if opts.min_bands: MINBANDS = opts.min_bands
+
+    if os.path.exists(opts.outfile) and not opts.force:
+        logger.warning("Found %s; skipping..."%opts.outfile)
+        sys.exit()
 
     logger.info("Loading files: %s"%opts.infiles)
     data = load_infiles(opts.infiles,INPUT_COLS)

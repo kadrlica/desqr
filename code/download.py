@@ -81,38 +81,41 @@ POWER(10, (o.MAG_PSF - 25.0)/-2.5) as FLUX_PSF,
 POWER(10, (o.MAG_PSF - 25.0)/-2.5)*o.MAGERR_PSF/1.0857362 as FLUXERR_PSF,
 o.FLUX_AUTO, o.FLUXERR_AUTO,
 o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL
-FROM y1a1_firstcut_eval ev, y1a1_objects o, y1a1_image i
+FROM y1a1_firstcut_eval ev, y1a1_objects o, y1a1_image@DESSCI i
 WHERE ev.expnum = %(expnum)i and ev.exposureid = i.exposureid and o.imageid = i.id 
-and o.mag_psf < 90 and o.mag_auto < 90 and o.flags < 4 and o.magerr_psf < 0.5; 
-"""%kwargs
+AND o.mag_psf < 90 and o.mag_auto < 90 
+AND o.flags < 4 and o.magerr_psf < 0.5;"""%kwargs
     return query
 
-def y2n_object_query(expnum=None,reqnum=None,attnum=None):
+def se_object_query(expnum=None,reqnum=None,attnum=None):
     kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
     kwargs['unitname'] = 'D%(expnum)08d'%kwargs
     kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
     # Robert suggests the CCDNUM can come from:
     #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
-    # Also, it would be good to cut objects near the CCD edges.
-    #... o.XWIN_IMAGE between 15 and 2048-30,YWIN_IMAGE between 15 and 4096-30
+    # CAST of OBJECT_NUMBER is necessary to agree with Y1A1 type
     query = """-- Y2N_FIRSTCUT single-epoch catalog download
 -- magerr = 2.5/ln(10) * fluxerr/flux
 SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
-CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, 
-ev.REQNUM, ev.ATTNUM, 
+CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, ev.REQNUM, ev.ATTNUM, 
 CAST('Y2N_FIRSTCUT' AS VARCHAR(13)) as TAG,
 ev.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
 CAST(o.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, o.FWHM_WORLD, o.FLAGS, 
-o.OBJECT_NUMBER, o.RA, o.DEC,
+CAST(o.OBJECT_NUMBER AS NUMBER(11,0)) as OBJECT_NUMBER, 
+o.RA, o.DEC,
 o.FLUX_PSF, o.FLUXERR_PSF,
 o.FLUX_AUTO, o.FLUXERR_AUTO,
 o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
 FROM prod.se_object o, prod.firstcut_eval ev
 WHERE o.filename like '%(filename)s'
 and ev.unitname='%(unitname)s' and ev.reqnum=%(reqnum)i and ev.attnum=%(attnum)i
-and o.flux_psf > 0 and o.flux_auto > 0 and o.flags < 4
-and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
+and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
+and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5
+and o.XWIN_IMAGE between 15 and 2048-30
+and o.YWIN_IMAGE between 15 and 4096-30;"""%kwargs
     return query
+
+y2n_object_query = se_object_query
 
 def y1a1_coadd_objects_query():
     query = """-- Y1A1 object download
@@ -130,8 +133,7 @@ wavg_magerr_psf_y
 from y1a1_coadd_objects
 where abs(wavg_spread_model_r) < 0.002 
 and wavgcalib_mag_psf_r - xcorr_sfd98_r < 23
-and wavg_magerr_psf_r < 0.1;
-"""
+and wavg_magerr_psf_r < 0.1;"""
     return query
 
 def y1a1_finalcut_query(band):
@@ -148,27 +150,8 @@ AND MAGERR_PSF < 1 AND MAGERR_AUTO < 1
 AND FLAGS < 4 AND BAND like '%(band)s%%';""" % kwargs
     return query
 
-def exposure_query(tag=None,program='survey'):
-    y1a1 = y1a1_exposure_query(program)
-    y2n = y2n_exposure_query(program)
-    if tag is None:
-        query = y1a1.split('ORDER BY')[0]
-        #query += "and e.object like 'DES supernova hex SN-C1%'\n"
-        query += "UNION ALL\n" 
-        query += y2n.split('ORDER BY')[0]
-        #query += "and e.object like 'DES supernova hex SN-C1%'\n"
-        query += "ORDER BY expnum;"
-        return query
-    elif tag.upper() == 'Y1A1':
-        return y1a1
-    elif tag.upper() == 'Y2N':
-        return y2n
-    else:
-        msg = 'Unrecognized tag: %s'%tag
-        raise Exception(msg)
-
 def y1a1_exposure_query(program='survey'):
-    query = """-- Y1A1 exposures that pass firstcut eval
+    query = """-- Y1A1 exposures that pass finalcut eval
 SELECT CAST('D00'||ev.expnum as VARCHAR(9)) as UNITNAME, 
 ev.EXPNUM, TO_CHAR(-1) AS REQNUM, TO_CHAR(-1) AS ATTNUM,
 e.TELRA, e.TELDEC, e.NITE, 
@@ -179,21 +162,22 @@ and ev.accepted = 'True' and ev.program = '%s'
 ORDER BY e.expnum;"""%program
     return query    
 
-def y2n_exposure_query(program='survey'):
-    query = """-- Y2N exposures that pass firstcut eval
+def firstcut_exposure_query(program='survey',tag='Y2N_FIRSTCUT'):
+    query = """-- Nightly exposures that pass firstcut eval
 SELECT ev.UNITNAME, ev.EXPNUM, 
 TO_CHAR(ev.REQNUM) AS REQNUM, TO_CHAR(ev.ATTNUM) AS ATTNUM, 
 e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
-CAST(e.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, 'Y2N_FIRSTCUT' as TAG
+CAST(e.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, '%s' as TAG
 from prod.firstcut_eval ev, prod.exposure e, prod.ops_proctag t
 WHERE e.expnum = ev.expnum 
 and ev.unitname = t.unitname and ev.reqnum = t.reqnum and ev.attnum = t.attnum
-and ev.accepted = 'True' and ev.program = '%s'
-ORDER BY ev.expnum;"""%program
+and ev.accepted = 'True' and ev.program = '%s' and t.tag = '%s'
+ORDER BY ev.expnum;"""%(tag,program,tag)
     return query
 
 def desgw_exposure_query():
     query = """-- DESGW exposures that pass firstcut eval
+-- I think this tag is 'GW1_FIRSTCUT'
 SELECT ev.UNITNAME, ev.EXPNUM, 
 TO_CHAR(ev.REQNUM) AS REQNUM, TO_CHAR(ev.ATTNUM) AS ATTNUM, 
 e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
@@ -209,7 +193,19 @@ and (
 ) ORDER BY ev.expnum;"""
     return query
 
-def zeropoint_query():
+def maglites_exposure_query():
+    query = """-- MagLiteS exposures
+SELECT ev.UNITNAME, ev.EXPNUM, 
+TO_CHAR(ev.REQNUM) AS REQNUM, TO_CHAR(ev.ATTNUM) AS ATTNUM, 
+e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
+CAST(e.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, t.TAG
+from prod.firstcut_eval@desoper ev, prod.exposure@desoper e, prod.proctag@desoper t
+WHERE e.expnum = ev.expnum and t.tag = 'MAGLITES_FIRSTCUT'
+and ev.unitname = t.unitname and ev.reqnum = t.reqnum and ev.attnum = t.attnum
+ORDER BY ev.expnum;"""
+    return query
+
+def y2q_zeropoint_query():
     query = """-- qSLR zeropoints
 SELECT * from erykoff.y2n_qslr_v2 zp
 ORDER BY expnum;"""
@@ -222,19 +218,71 @@ ORDER BY expnum, ccdnum;"""
 SELECT * from erykoff.y2n_y1a1_qslr_v4
 ORDER BY expnum, ccdnum;"""
 
+    query = """-- qSLR zeropoints
+select EXPNUM, CCD AS CCDNUM, 
+CAST(BAND AS VARCHAR(1)) AS BAND, 
+RA_MEAN as RA, DEC_MEAN as DEC, 
+MAG_ZERO, SIGMA_MAG_ZERO as STD_MAG_ZERO, 
+QSLR_FLAG as ZP_FLAG
+from erykoff.y2n_y1a1_qslr_v4
+ORDER BY expnum, ccdnum;"""
     return query
 
-qslr_query = zeropoint_query
+qslr_query = y2q_zeropoint_query
 
 def gcm_query():
     query = """-- Select Y1A1 GCM zeropoints
 select EXPNUM, CCD AS CCDNUM, 
 CAST(BAND AS VARCHAR(1)) AS BAND, RA, DEC, 
-ZEROPOINT, SIGMA_ZEROPOINT 
+ZEROPOINT, SIGMA_ZEROPOINT , 0 as ZP_FLAG
 from Y1A1_IMAGE where ZEROPOINT is not NULL;
 """
     return query
 
+def maglites_zeropoint_query():
+    query = """-- Zeropoints for maglites from PSM solution
+select EXPNUM_1 as EXPNUM, CCDNUM_1 as CCDNUM, BAND, 
+RA_CENT as RA, DEC_CENT as DEC,
+MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
+from dtucker.MAGLITES_PSM_ZPS_EBV@DESSCI
+order by EXPNUM, CCDNUM;
+"""
+    query = """-- Zeropoints for maglites
+select EXPNUM, CCDNUM, BAND, RA_CENT as RA, DEC_CENT as DEC,
+MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
+from DTUCKER.MAGLITES_APASS_DES_ZPS_EBV@DESSCI
+order by EXPNUM, CCDNUM;
+"""
+    return query
+
+def zeropoint_query(tags=None):
+    tags = map(str.upper,tags)
+    if 'Y1A1_FINALCUT' in tags or 'Y2N_FIRSTCUT' in tags:
+        return y2q_zeropoint_query()       
+    if 'MAGLITES_FIRSTCUT' in tags:
+        return maglites_zeropoint_query()
+    
+def exposure_query(tags=None,program='survey'):
+    tags = map(str.upper,tags)
+    queries = []
+    if 'Y1A1_FINALCUT' in tags:
+        queries.append(y1a1_exposure_query(program))
+    if 'Y2N_FIRSTCUT' in tags:
+        queries.append(firstcut_exposure_query(program,tag='Y2N_FIRSTCUT'))
+    if 'Y3N_FIRSTCUT' in tags:
+        queries.append(firstcut_exposure_query(program,tag='Y3N_FIRSTCUT'))
+    if 'DESGW' in tags: 
+        queries.append(desgw_exposure_query())
+    if 'MAGLITES_FIRSTCUT' in tags: 
+        queries.append(maglites_exposure_query())
+
+    if not queries:
+        msg = 'Unrecognized tag: %s'%tags
+        raise Exception(msg)
+
+    query = 'UNION ALL\n'.join(q.split('ORDER BY')[0] for q in queries)
+    query += 'ORDER BY expnum;'
+    return query
 
 def download(outfile,query,sqlfile=None,section='desoper',force=False):
     if os.path.exists(outfile) and not force:
@@ -272,14 +320,14 @@ if __name__ == "__main__":
     opts = parser.parse_args()
 
     section = 'desoper'
-    if opts.tag == 'Y2N_FIRSTCUT':
-        query = y2n_object_query(opts.expnum,opts.reqnum,opts.attnum)
+    if opts.tag in ['Y2N_FIRSTCUT','Y3N_FIRSTCUT','MAGLITES_FIRSTCUT']:
+        query = se_object_query(opts.expnum,opts.reqnum,opts.attnum)
     elif opts.tag == 'Y1A1_FINALCUT':
         query = y1a1_object_query(expnum=opts.expnum)
     elif opts.tag == 'DESGW':
         query = y2n_object_query(opts.expnum,opts.reqnum,opts.attnum)
     else:
-        raise Exception('...')
+        raise Exception('Tag not found: %s'%opts.tag)
 
     download(opts.outfile,query,opts.loadsql,section,opts.force)
 

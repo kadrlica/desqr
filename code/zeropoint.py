@@ -29,6 +29,34 @@ def calc_magerr(flux,fluxerr):
     magerr[~np.isfinite(magerr)] = BADMAG
     return magerr
 
+def read_blacklist(blacklist):
+    if not blacklist: return None
+        
+    if isinstance(blacklist,basestring):
+        ext = os.path.splitext(blacklist)[-1]
+        if ext == '.csv':
+            bl = np.recfromcsv(blacklist)
+        elif ext == '.fits':
+            bl = fitsio.read(blacklist)
+        else:
+            msg = "Unrecognized blacklist extension: %s"%ext
+            raise Exception(msg)
+    elif hasattr(blacklist,'__iter__'):
+        # A cleaner option?
+        #bllist = [read_blacklist(filename) for filename in blacklist]
+        #bl = recfn.stack_arrays(bllist,usemask=False,asrecarray=True)
+        for i,filename in enumerate(blacklist):
+            if i == 0:
+                bl = read_blacklist(filename)
+            else:
+                bl = np.append(bl,read_blacklist(filename))
+    else:
+        msg = 'Unrecognized blacklist: %s'%blacklist
+        raise Exception(msg)
+
+    bl.dtype.names = map(str.upper,bl.dtype.names)
+    return bl
+
 def read_zeropoint(zeropoint,blacklist=None):
     """ Read the zeropoints and apply the blacklist. """
 
@@ -59,18 +87,11 @@ def read_zeropoint(zeropoint,blacklist=None):
     if blacklist is None:
         return zp
     else:
-        ext = os.path.splitext(blacklist)[-1]
-        if ext == '.csv':
-            bl = np.recfromcsv(blacklist)
-        elif ext == '.fits':
-            bl = fitsio.read(blacklist)
-        else:
-            msg = "Unrecognized blacklist extension: %s"%ext
-            raise Exception(msg)
+        bl = read_blacklist(blacklist)
 
-        # A hack to do the sorting
-        zpval = zp['EXPNUM'] + zp['CCDNUM']/100.
-        blval = bl['expnum'] + bl['ccdnum']/100.
+        # Unique value from EXPNUM, CCDNUM
+        zpval = utils.uid(zp['EXPNUM'],zp['CCDNUM'])
+        blval = utils.uid(bl['EXPNUM'],bl['CCDNUM'])
         idx = np.in1d(zpval,blval)
         return zp[~idx]
 
@@ -112,7 +133,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('infile')
     parser.add_argument('zpfile')
-    parser.add_argument('-b','--blacklist',default=None)
+    parser.add_argument('-b','--blacklist',default=None,action='append')
     parser.add_argument('-f','--force',action='store_true')
 
     args = parser.parse_args()
@@ -126,3 +147,4 @@ if __name__ == "__main__":
     # Writing...
     logger.info("Writing %s..."%args.infile)
     utils.insert_columns(args.infile,out,force=args.force)
+    logger.info("Done.")

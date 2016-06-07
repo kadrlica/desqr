@@ -77,7 +77,7 @@ def match_ball_tree(lon,lat,radius=1.0):
         raise Exception(msg)
 
     nobjs = len(lon)
-    logger.info("Found %i non-unique objects with %s arcsec."%(nobjs,radius))
+    logger.info("Found %i total objects with %s arcsec."%(nobjs,radius))
      
     # First iteration...
     coords = projector(lon,lat)

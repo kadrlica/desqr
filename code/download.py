@@ -88,14 +88,18 @@ AND o.flags < 4 and o.magerr_psf < 0.5;"""%kwargs
     return query
 
 def se_object_query(expnum=None,reqnum=None,attnum=None):
-    kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
-    kwargs['unitname'] = 'D%(expnum)08d'%kwargs
-    kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
+    """
+    Query to download catalog objects from the single-epoch images in the
+    refactored system.
+    """
     # Robert suggests the CCDNUM can come from:
     #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
     # CAST of OBJECT_NUMBER is necessary to agree with Y1A1 type
-    query = """-- Y2N_FIRSTCUT single-epoch catalog download
--- magerr = 2.5/ln(10) * fluxerr/flux
+    kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
+    kwargs['unitname'] = 'D%(expnum)08d'%kwargs
+    kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
+    query = """-- Single-epoch catalog download
+-- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
 SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
 CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, ev.REQNUM, ev.ATTNUM, 
 CAST('Y2N_FIRSTCUT' AS VARCHAR(13)) as TAG,
@@ -116,6 +120,39 @@ and o.YWIN_IMAGE between 15 and 4096-30;"""%kwargs
     return query
 
 y2n_object_query = se_object_query
+
+def y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
+    """
+    Query to download catalog objects from the single-epoch images in the
+    refactored system.
+    """
+    # Robert suggests the CCDNUM can come from:
+    #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
+    # CAST of OBJECT_NUMBER is necessary to agree with Y1A1 type
+    kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
+    kwargs['unitname'] = 'D%(expnum)08d'%kwargs
+    kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
+    kwargs['tag'] = tag
+    query = """-- Single-epoch catalog download
+-- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
+SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
+CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, ev.REQNUM, ev.ATTNUM, 
+CAST('%(tag)s' AS VARCHAR(13)) as TAG,
+ev.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
+CAST(o.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, o.FWHM_WORLD, o.FLAGS, 
+CAST(o.OBJECT_NUMBER AS NUMBER(11,0)) as OBJECT_NUMBER, 
+o.RA, o.DEC,
+o.FLUX_PSF, o.FLUXERR_PSF,
+o.FLUX_AUTO, o.FLUXERR_AUTO,
+o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
+FROM prod.se_object o, prod.finalcut_eval ev
+WHERE o.filename like '%(filename)s'
+and ev.unitname='%(unitname)s' and ev.reqnum=%(reqnum)i and ev.attnum=%(attnum)i
+and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
+and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
+and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
+    return query
+
 
 def y1a1_coadd_objects_query():
     query = """-- Y1A1 object download
@@ -175,6 +212,22 @@ and ev.accepted = 'True' and ev.program = '%s' and t.tag = '%s'
 ORDER BY ev.expnum;"""%(tag,program,tag)
     return query
 
+def finalcut_exposure_query(program='survey',tag='Y2A1_FINALCUT'):
+    query = """-- FINALCUT exposures that pass QA_SUMMARY cut
+SELECT t.UNITNAME, e.EXPNUM, 
+TO_CHAR(t.REQNUM) AS REQNUM, TO_CHAR(t.ATTNUM) AS ATTNUM, 
+e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
+CAST(e.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, t.TAG
+from prod.exposure e, prod.ops_proctag t, 
+prod.finalcut_eval ev, prod.qa_summary qa,
+WHERE t.pfw_attempt_id = qa.pfw_attempt_id 
+and t.unitname = ev.unitname and t.reqnum = ev.reqnum and t.attnum = t.reqnum
+and qa.expnum = e.expnum
+and ((qa.flag < 20000 and MOD(qa.flag,100) = 0) or (ev.accepted='True'))
+and e.program = '%s' and t.tag = '%s'
+ORDER BY e.expnum;"""%(program,tag)
+    return query
+
 def desgw_exposure_query():
     query = """-- DESGW exposures that pass firstcut eval
 -- I think this tag is 'GW1_FIRSTCUT'
@@ -193,8 +246,9 @@ and (
 ) ORDER BY ev.expnum;"""
     return query
 
-def maglites_exposure_query():
-    query = """-- MagLiteS exposures
+def maglites_exposure_query(tag='MAGLITES_FIRSTCUT'):
+    if tag == 'MAGLITES_FIRSTCUT':
+        query = """-- MagLiteS FIRSTCUT exposures
 SELECT ev.UNITNAME, ev.EXPNUM, 
 TO_CHAR(ev.REQNUM) AS REQNUM, TO_CHAR(ev.ATTNUM) AS ATTNUM, 
 e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
@@ -203,6 +257,19 @@ from prod.firstcut_eval@desoper ev, prod.exposure@desoper e, prod.proctag@desope
 WHERE e.expnum = ev.expnum and t.tag = 'MAGLITES_FIRSTCUT'
 and ev.unitname = t.unitname and ev.reqnum = t.reqnum and ev.attnum = t.attnum
 ORDER BY ev.expnum;"""
+    elif tag == 'Y3A1_MAGLITES':
+        query = """-- Y3A1 MagLiteS FINALCUT exposures
+SELECT t.UNITNAME, e.EXPNUM, 
+TO_CHAR(t.REQNUM) AS REQNUM, TO_CHAR(t.ATTNUM) AS ATTNUM, 
+e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
+CAST(e.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, t.TAG
+from prod.finalcut_eval ev, prod.exposure e, prod.ops_proctag t
+WHERE ev.expnum = e.expnum and t.tag = 'Y3A1_MAGLITES'
+and ev.unitname = t.unitname and ev.reqnum = t.reqnum and ev.attnum = t.attnum
+ORDER BY e.expnum;"""
+    else:
+        msg = "Unrecognized tag: %s"%tag
+        raise Exception(msg)
     return query
 
 def y2q_zeropoint_query():
@@ -255,6 +322,14 @@ order by EXPNUM, CCDNUM;
 """
     return query
 
+def desdm_blacklist():
+    query = """-- Blacklisted CCDs from official DESDM table
+select EXPNUM, CCDNUM
+from prod.BLACKLIST@DESOPER
+order by EXPNUM, CCDNUM;
+"""
+    return query
+
 def zeropoint_query(tags=None):
     tags = map(str.upper,tags)
     if 'Y1A1_FINALCUT' in tags or 'Y2N_FIRSTCUT' in tags:
@@ -273,8 +348,12 @@ def exposure_query(tags=None,program='survey'):
         queries.append(firstcut_exposure_query(program,tag='Y3N_FIRSTCUT'))
     if 'DESGW' in tags: 
         queries.append(desgw_exposure_query())
-    if 'MAGLITES_FIRSTCUT' in tags: 
-        queries.append(maglites_exposure_query())
+    if 'MAGLITES_FIRSTCUT'  in tags: 
+        queries.append(maglites_exposure_query('MAGLITES_FIRSTCUT'))
+    elif 'Y3A1_MAGLITES' in tags:
+        queries.append(maglites_exposure_query('Y3A1_MAGLITES'))
+    if ('Y2A1_FINALCUT' in tags) or ('Y3A1_FINALCUT' in tags):
+        queries.append(finalcut_exposure_query(program,tag='Y2A1_FINALCUT'))
 
     if not queries:
         msg = 'Unrecognized tag: %s'%tags
@@ -301,7 +380,8 @@ def download(outfile,query,sqlfile=None,section='desoper',force=False):
     sql.write('\n'+'> %s \n'%outfile)
     sql.close()
     
-    cmd = 'easyaccess -s %s -l %s'%(section,sqlfile)
+    #cmd = 'easyaccess -s %s -l %s'%(section,sqlfile)
+    cmd = 'easyaccess --config set loading_bar=no -s %s -l %s'%(section,sqlfile)
     print cmd
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
@@ -326,6 +406,8 @@ if __name__ == "__main__":
         query = y1a1_object_query(expnum=opts.expnum)
     elif opts.tag == 'DESGW':
         query = y2n_object_query(opts.expnum,opts.reqnum,opts.attnum)
+    elif opts.tag in ['Y2A1_FINALCUT','Y3A1_FINALCUT','Y3A1_MAGLITES']:
+        query = y3a1_object_query(opts.expnum,opts.reqnum,opts.attnum,tag=opts.tag)
     else:
         raise Exception('Tag not found: %s'%opts.tag)
 

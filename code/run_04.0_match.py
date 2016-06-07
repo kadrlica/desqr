@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
+    # Sometimes sleep needs to be 30s or more...
     parser.add_argument('-s','--sleep',default=3,type=float)
     parser.add_argument('-q','--queue',default='condor')
     opts = parser.parse_args()

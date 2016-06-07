@@ -34,7 +34,8 @@ FLAGS = ['FLAGS']
 NEPOCHS = ['NEPOCHS']
 TEFF = ['T_EFF']
 EXPNUM = ['EXPNUM','CCDNUM']
-EXTINCTION = ['EXTINCTION']
+#EXTINCTION = ['EXTINCTION']
+EXTINCTION = []
 
 BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + EXTINCTION
 INPUT_COLS = IDX + [BAND] + COORDS + BEST
@@ -352,7 +353,6 @@ def good_objects(data):
     dtype = mags.dtype[0].str
     sel &= np.all(mags.view(dtype).reshape((nobjs,-1))<BADMAG,axis=1)
     sel &= np.all(mags.view(dtype).reshape((nobjs,-1))>0,axis=1)
-
 
     # Objects with valid spread_model and spreaderr values
     # 99 is chosen as the max of NUMBER(7,5) data type

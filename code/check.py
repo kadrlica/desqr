@@ -12,16 +12,17 @@ import yaml
 import fitsio
 import numpy as np
 
-from const import BANDS,OBJECT_ID,UNIQUE_ID
+from const import BANDS,OBJECT_ID,UNIQUE_ID,BADMAG
 from utils import bfields
 
 SECTIONS = ['download','pixelize','zeropoint','match','catalog']
 OK  = color('OK','green')
+FAIL = color('FAIL','red')
 BAD = color('BAD','red')
    
 def bad_values_str(values):
     opts = np.get_printoptions()
-    np.set_printoptions(precision=5,threshold=25,edgeitems=5)
+    np.set_printoptions(precision=4,threshold=25,edgeitems=4)
     ret = repr(values)
     np.set_printoptions(**opts)
     return ret
@@ -53,7 +54,6 @@ def print_points(idx,total,indent=0,step=10):
     sys.stdout.write("\r%s(%-9s): "%(idt,n*'.'))
     sys.stdout.flush()
 
-
 def dir_exists(dirname):
     if not os.path.exists(dirname):
         msg = "No directory:"
@@ -61,50 +61,145 @@ def dir_exists(dirname):
         print dirname
         return False
     return True
+
+# These pool functions should be moved to utils
+global counter
+counter = Value('i',0)
+
+def init_counter(args):
+    """ Initialize the counter for later use """
+    global counter
+    counter = args
+
+def run_pool(func, args, **kwargs):
+    """ Initialize the pool with a shared counter """
+    global counter
+    counter = Value('i',0)
+    pool = Pool(initializer=init_counter, initargs=(counter,),**kwargs)
+    return pool.map(func,args)
+
+def check_files(explist,files):
+    exp = explist
+    nfiles = len(files)
+    unit = np.array([basename(f).split('_')[0] for f in files])
+    missing = ~np.in1d(exp['unitname'],unit)
+    extra = ~np.in1d(unit,exp['unitname'])
     
+    print_running(nfiles,nfiles,indent=4)
+    if missing.sum():
+        msg = "Missing %s file(s):"%missing.sum()
+        print color(msg,'red')
+        print 4*' '+'%s'%exp['unitname'][missing]
+    elif extra.sum():
+        msg = "  Found %s extra file(s):"%extra.sum()
+        print color(msg,'red')
+        print 4*' '+'%s'%unit[extra]
+    else: print OK
+
+    print_running(nfiles,nfiles,indent=4)
+    if missing.sum():
+        msg = "Missing %s file(s):"%missing.sum()
+        print color(msg,'red')
+        print 4*' '+'%s'%exp['unitname'][missing]
+    elif extra.sum():
+        msg = "Extra %s file(s):"%extra.sum()
+        print color(msg,'red')
+        print 4*' '+'%s'%unit[extra]
+    else: print OK
+
 def count_objects(args):
-    i,nfiles,f,band = args
-    print_running(i+1,nfiles,indent=4,step=1)
+    global counter
+    with counter.get_lock(): counter.value += 1
+
+    f,nfiles,band = args
+    print_running(counter.value,nfiles,indent=4,step=1)
 
     fits = fitsio.FITS(f,'r')
     num = fits[1].get_nrows()
+    hpx = (fits[1].read_header().get('HPX') is not None)
     fits.close()
 
-    if (band=='Y' and num < 5e3) or (band!='Y' and num < 1e4):
+    # Ignore low numbers of objects in pixelized files
+    if (not hpx) and (num < 5e3 if band=='Y' else num < 1e4):
         msg = "Only %i objects in %s"%(num,f)
         print color(msg,'yellow')
 
     return num
 
+def check_columns(args,columns=None,select=None,msg=None):
+    """ Abstract base function for checking a column"""
+    global counter
+    f,nfiles,band = args
+
+    with counter.get_lock(): counter.value += 1
+    print_running(counter.value,nfiles,indent=4,step=1)
+
+    try: 
+        data = fitsio.read(f,columns=columns)
+    except ValueError as e:
+        msg = "Couldn't read %(columns)s from %(filename)s"
+        msg = msg%dict(columns=columns,filename=f)
+        print color(msg,'red')
+        return True
+    
+    sel = select(data) 
+    if np.any(sel):
+        if not msg: msg = "Bad %(columns)s value in %(filename)s"
+        msg = msg%dict(columns=columns,filename=f)
+        print color(msg,'red')
+        print 4*' '+bad_values_str(data[sel])
+        return True
+
+    return False
+
 def check_ra(args):
-    i,nfiles,f,band = args
-    print_running(i+1,nfiles,indent=4,step=1)
+    kwargs = dict(columns='RA', select=lambda x: (x<0) | (x>360))
+    return check_columns(args,**kwargs)
 
-    ra = fitsio.read(f,columns='RA')
+def check_flux(args):
+    kwargs = dict(columns='FLUX_AUTO', select=lambda x: (x<0) | (x>1e9))
+    return check_columns(args,**kwargs)
 
-    bad = False
-    sel = ( (ra<0) | (ra>360) )
-    if np.any(sel):
-        msg = "Bad RA value in %s"%f
-        print color(msg,'red')
-        print 4*' '+bad_values_str(ra[sel])
-        bad = True
-    return bad
+def check_ccdnum(args):
+    kwargs = dict(columns='CCDNUM', select=lambda x: (x<1) | (x>62))
+    return check_columns(args,**kwargs)
 
-def check_fluxes(args):
-    i,nfiles,f,band = args
-    print_running(i+1,nfiles,indent=4,step=1)
+def check_zeropoint(args):
+    def select(x):
+        olderr = np.seterr(invalid='ignore')
+        sel = (~np.isfinite(x)) | (x < 5)
+        sel |= (x>35) & ~((x==BADMAG) | (x==999))
+        np.seterr(**olderr)
+        return sel
+    kwargs = dict(columns='MAG_ZERO',select=select)
+    return check_columns(args,**kwargs)
 
-    auto = fitsio.read(f,columns='FLUX_AUTO')
+def check_magnitude(args):
+    def select(x):
+        olderr = np.seterr(invalid='ignore')
+        sel = (~np.isfinite(x)) | (x < 5) 
+        sel |= ((x > 35) & (x != BADMAG))
+        np.seterr(**olderr)
+        return sel
+    kwargs = dict(columns='MAG_AUTO',select=select)
+    return check_columns(args,**kwargs)
 
-    bad = False
-    sel = ((auto < 0) | (auto > 1e9))
-    if np.any(sel):
-        msg = "Bad FLUX_AUTO value in %s"%f
-        print color(msg,'red')
-        print 4*' '+bad_values_str(auto[sel])
-        bad = True
-    return bad
+def check_objid(args):
+    kwargs = dict(columns=OBJECT_ID,select=lambda x: (~np.isfinite(x)) | (x < 0))
+    return check_columns(args,**kwargs)
+
+def check_match(args):
+    def select(x):
+        nobjs = float(len(x))
+        frac = (x > 0).sum()/nobjs
+        bad = (frac < 0.1) and (nobjs > 1e4)
+        if bad:
+            msg = 'Match fraction = %.2f'%frac
+            print color(msg,'yellow')
+        return bad
+    msg = "Poor %(columns)s match in %(filename)s"
+    kwargs = dict(columns=bfields('NEPOCHS',band),select=select,msg=msg)
+    return check_columns(args,**kwargs)
 
 if __name__ == "__main__":
     import argparse
@@ -141,83 +236,63 @@ if __name__ == "__main__":
 
             ##############################
             if section == 'download':
-
                 dirname = join(config['rawdir'],band)
                 if not dir_exists(dirname): continue
 
+                RAWCOUNT = 0
+
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
+                args = [(f,nfiles,band) for f in files]
 
-                print "  Filenames: "
+                print 2*' '+"Files:"
                 exp = np.recfromcsv(config['explist'])
                 exp = exp[exp['band']==band]
-                unit = np.array([basename(f).split('_')[0] for f in files])
-                missing = ~np.in1d(exp['unitname'],unit)
-                extra = ~np.in1d(unit,exp['unitname'])
-
-                print_running(nfiles,nfiles,indent=4)
-                if missing.sum():
-                    msg = "Missing %s file(s):"%missing.sum()
-                    print color(msg,'red')
-                    print 4*' '+'%s'%exp['unitname'][missing]
-                elif extra.sum():
-                    msg = "  Found %s extra file(s):"%extra.sum()
-                    print color(msg,'red')
-                    print 4*' '+'%s'%unit[extra]
-                else: print OK
-                
-                RAWCOUNT = 0
-                args = [(i,nfiles,f,band) for i,f in enumerate(files)]
-                p = Pool()
+                check_files(exp,files)
 
                 print 2*' '+"Objects:"
-                out = p.map(count_objects,args)
+                out = run_pool(count_objects,args)
                 RAWCOUNT = np.sum(out)
                 print RAWCOUNT, OK
+                
+                print 2*' '+"CCDNUM:"
+                out = run_pool(check_ccdnum,args)
+                print FAIL if np.any(out) else OK
 
                 print 2*' '+"RA:"
-                out = p.map(check_ra,args)
-                if not np.any(out): print OK
+                out = run_pool(check_ra,args)
+                print FAIL if np.any(out) else OK
                 
                 print 2*' '+"Fluxes:"
-                out = p.map(check_fluxes,args)
-                if not np.any(out): print OK
+                out = run_pool(check_flux,args)
+                print FAIL if np.any(out) else OK
+
+                # Check that the columns and dtypes are the same in
+                # all files...
 
             ##############################
             if section == 'pixelize':
                 dirname = join(config['hpxdir'],band)
                 if not dir_exists(dirname): continue
 
+                HPXCOUNT = 0
+
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
+                args = [(f,nfiles,band) for f in files]
 
-                HPXCOUNT = 0
                 print 2*' '+"Objects:"
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
-                    fits = fitsio.FITS(f,'r')
+                out = run_pool(count_objects,args)
+                HPXCOUNT = np.sum(out)
+                print HPXCOUNT
 
-                    num = fits[1].get_nrows()
-                    HPXCOUNT += num
+                if RAWCOUNT is not None:
+                    print 4*' '+"raw: %i | hpx: %i"%(RAWCOUNT,HPXCOUNT),
+                    print FAIL if RAWCOUNT != HPXCOUNT else OK
 
-                    ra = fits[1].read(columns='RA')
-                    sel = np.isnan(ra) | (ra<0) | (ra>360)
-
-                    bad = False
-                    if np.any( sel ):
-                        msg = "Bad RA value in %s"%f
-                        print color(msg,'red')
-                        print 4*' '+str(ra[sel])
-                        bad = True
-                    fits.close()
-                if not bad: print OK
-                print 4*' '+"Number of Objects: %i"%HPXCOUNT
-
-                print 4*' '+"raw: %i | hpx: %i"%(RAWCOUNT,HPXCOUNT),
-                if RAWCOUNT is not None and RAWCOUNT != HPXCOUNT:
-                    print BAD
-                else:
-                    print OK
+                print 2*' '+"RA:"
+                out = run_pool(check_ra,args)
+                print FAIL if np.any(out) else OK
 
             ##############################
             if section == 'zeropoint':
@@ -226,38 +301,15 @@ if __name__ == "__main__":
 
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
-                print "  Zeropoints:"
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
-                    fits = fitsio.FITS(f,'r')
-                    zp = fits[1].read(columns='MAG_ZERO')
-                    sel = np.isnan(zp) | (zp > 35) | (zp < 25)
+                args = [(f,nfiles,band) for f in files]
 
-                    bad = False
-                    if np.any( sel ):
-                        msg = "Bad zeropoint in %s"%f
-                        print 4*' '+str(zp[sel])
-                        print color(msg,'red')
-                        bad = True
-                    fits.close()
-                if not bad: 
-                    msg = 'OK'
-                    print color(msg,'green')
+                print 2*' '+"Zeropoints:"
+                out = run_pool(check_zeropoint,args)
+                print FAIL if np.any(out) else OK
 
-                print "  Magnitudes:"
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
-                    fits = fitsio.FITS(f,'r')
-                    auto = fits[1].read(columns='MAG_AUTO')
-                    sel = np.isnan(auto) | (auto < 5) | ((auto > 30) & (auto != 99))
-                    bad = False
-                    if np.any( sel ):
-                        msg = "Unusual MAG_AUTO in %s"%f
-                        print color(msg,'yellow')
-                        print 4*' '+str(auto[sel])
-                        bad = True
-                    fits.close()
-                if not bad: print OK
+                print 2*' '+"Magnitudes:"
+                out = run_pool(check_magnitude,args)
+                print FAIL if np.any(out) else OK
             
             ##############################
             if section == 'match':
@@ -266,17 +318,11 @@ if __name__ == "__main__":
                 
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
+                args = [(f,nfiles,band) for f in files]
 
                 print "  Object IDs:"
-                bad = False
-                for i,f in enumerate(files):
-                    print_running(i,nfiles,indent=4,step=1)
-                    objid = fitsio.read(f,columns=OBJECT_ID)
-                    if np.any(np.isnan(objid) | (objid < 0)):
-                        msg = "Bad %s in %s"%(OBJECT_ID,f)
-                        print color(msg,'red')
-                        bad = True
-                if not bad: print OK
+                out = run_pool(check_objid,args)
+                print FAIL if np.any(out) else OK
                     
             ##############################
             if section == 'catalog':
@@ -287,38 +333,22 @@ if __name__ == "__main__":
                 
                 files = sorted(glob.glob(catdir+'/*.fits'))
                 nfiles = len(files)
+                args = [(f,nfiles,band) for f in files]
 
-                print "  Matching:"
                 CATCOUNT = 0
-                bad = False
-                for i,f in enumerate(files):
-                    print_running(i+1,nfiles,indent=4,step=1)
 
-                    epochs = bfields('NEPOCHS',bands)
-                    epoch  = bfields('NEPOCHS',band)
-                    coords = ['RA','DEC']
-                    #spread = bfields('SPREAD_MODEL',bands)
-                    columns = epochs + coords
-                    data = fitsio.read(f,columns=columns)
+                print 2*' '+"Objects:"
+                out = run_pool(count_objects,args)
+                CATCOUNT = np.sum(out)
+                print CATCOUNT, OK
+                 
+                print 2*' '+"RA:"
+                out = run_pool(check_ra,args)
+                print FAIL if np.any(out) else OK
 
-                    CATCOUNT += len(data)
+                print 2*' '+"Match Fraction:"
+                out = run_pool(check_match,args)
+                print FAIL if np.any(out) else OK
 
-                    sel = np.isnan(data['RA'])|np.isnan(data['DEC'])
-                    if np.any(sel):
-                        msg = "RA,DEC NaN in %s"%f
-                        print color(msg,'red')
-                        print 4*' '+str(data[['RA','DEC']][sel])
-                        bad = True
-
-                    nobs = float((data[epoch] > 0).sum())
-                    for b,e in zip(bands,epochs):
-                        if e == epoch: continue
-                        frac = ((data[e] > 0) & (data[epoch]>0)).sum()/nobs
-                        if frac < 0.5 and nobs > 1e4:
-                            msg = "Poor %s-%s match in %s"%(band,b,f)
-                            print color(msg,'yellow')
-                            print 4*' '+'Match fraction = %.2f'%frac
-                if not bad: print OK
-                print 4*' '+"Number of Objects: %i"%CATCOUNT
+    print "\nDone."
                 
-                # Check that the dtypes are the same in all of the files

@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+"""
+Map the footprint.
+"""
+
 import glob
 import os
 from os.path import join
@@ -47,8 +51,9 @@ sel_grizY = lambda x: sel_g(x) & sel_r(x) & sel_i(x) & sel_z(x) & sel_Y(x)
 
 if __name__ == "__main__":
     import argparse
-    description = "python script"
+    description = __doc__
     parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('config',nargs='?')
     parser.add_argument('-n','--nside',default=1024,type=int)
     parser.add_argument('-v','--verbose',action='store_true')
     opts = parser.parse_args()

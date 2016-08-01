@@ -3,6 +3,7 @@
 Calculate extinction for an input catalog.
 """
 __author__ = "Alex Drlica-Wagner"
+__email__  = "kadrlica@fnal.gov"
 
 import os
 import shutil

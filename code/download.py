@@ -128,7 +128,7 @@ def y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
     """
     # Robert suggests the CCDNUM can come from:
     #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
-    # CAST of OBJECT_NUMBER is necessary to agree with Y1A1 type
+    # William would like A_IMAGE,B_IMAGE, and THETA_IMAGE
     kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
     kwargs['unitname'] = 'D%(expnum)08d'%kwargs
     kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
@@ -140,10 +140,11 @@ CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, ev.REQNUM, ev.ATTNUM,
 CAST('%(tag)s' AS VARCHAR(13)) as TAG,
 ev.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
 CAST(o.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, o.FWHM_WORLD, o.FLAGS, 
-CAST(o.OBJECT_NUMBER AS NUMBER(11,0)) as OBJECT_NUMBER, 
+o.OBJECT_NUMBER, 
 o.RA, o.DEC,
 o.FLUX_PSF, o.FLUXERR_PSF,
 o.FLUX_AUTO, o.FLUXERR_AUTO,
+o.A_IMAGE,o.B_IMAGE,o.THETA_IMAGE,
 o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
 FROM prod.se_object o, prod.finalcut_eval ev
 WHERE o.filename like '%(filename)s'
@@ -212,16 +213,35 @@ and ev.accepted = 'True' and ev.program = '%s' and t.tag = '%s'
 ORDER BY ev.expnum;"""%(tag,program,tag)
     return query
 
-def finalcut_exposure_query(program='survey',tag='Y2A1_FINALCUT'):
-    query = """-- FINALCUT exposures that pass QA_SUMMARY cut
+def finalcut_exposure_query(program='survey',tag='Y3A1_FINALCUT'):
+    if tag in ('Y2A1_FINALCUT','Y3A1_FINALCUT'):
+        tag = 'Y3A1_FINALCUT'
+
+    ### From Robert, the definition of qa.flag is:
+    ###
+    ###    1: Under Teff_Limit
+    ###    2: No T_eff possible
+    ###   10: FWHM: Exceed SeeingLimit for inclusion in survey
+    ###  
+    ###  100: Suspect Astrometry (ndets<100)&&(n_apass||n_nomad<100)
+    ###  200: Poor Astrometry (sigma)
+    ###  400: Poor Astrometry (offset)
+    ###  
+    ### 1000: Poor Sky Subtraction (skytilt > 0.02)
+    ### 2000: Extremely Poor SkySub (skytilt > 0.2)
+    ###  
+    ### 10000: Some CCDs present in the BLACKLIST.
+    ### 20000: All CCDs present in the BLACKLIST
+
+    query = """-- FINALCUT exposures that pass QA_SUMMARY *or* FINALCUT_EVAL
 SELECT t.UNITNAME, e.EXPNUM, 
 TO_CHAR(t.REQNUM) AS REQNUM, TO_CHAR(t.ATTNUM) AS ATTNUM, 
 e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
 CAST(e.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, t.TAG
-from prod.exposure e, prod.ops_proctag t, 
-prod.finalcut_eval ev, prod.qa_summary qa,
+from prod.exposure e, prod.proctag t, 
+prod.finalcut_eval ev, prod.qa_summary qa
 WHERE t.pfw_attempt_id = qa.pfw_attempt_id 
-and t.unitname = ev.unitname and t.reqnum = ev.reqnum and t.attnum = t.reqnum
+and t.unitname = ev.unitname and t.reqnum = ev.reqnum and t.attnum = ev.attnum
 and qa.expnum = e.expnum
 and ((qa.flag < 20000 and MOD(qa.flag,100) = 0) or (ev.accepted='True'))
 and e.program = '%s' and t.tag = '%s'

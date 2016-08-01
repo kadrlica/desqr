@@ -7,6 +7,7 @@ import subprocess
 import matplotlib
 try:             os.environ['DISPLAY']
 except KeyError: matplotlib.use('Agg')
+from multiprocessing import Pool
 
 import fitsio
 import numpy as np
@@ -15,8 +16,7 @@ import scipy.stats
 import pylab as plt
 import matplotlib.colors as colors
 import healpy
-
-from multiprocessing import Pool
+import yaml
 
 from ugali.utils.healpix import ang2pix,pix2ang
 from ugali.utils.projector import angsep
@@ -28,8 +28,6 @@ from utils import bfields, load_infiles
 from footprint import blank,unseen
 import footprint
 from plotting import draw_footprint, draw_peak
-
-NSIDE = 1024
 
 def draw_maglim_hist(skymap,**kwargs):
     maglims = skymap[skymap > 0]
@@ -80,9 +78,6 @@ def draw_maglim_pixel(skymap,**kwargs):
     kwargs.setdefault('min',vmin)
     kwargs.setdefault('max',vmax)
     healpy.gnomview(skymap,**kwargs)
-
-def draw_maglim_footprint(skymap,**kwargs):
-    pass
 
 def draw_magerr(mag,magerr,**kwargs):
     kwargs.setdefault('fmt','o')
@@ -156,11 +151,42 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
         ret[band] = [hpx,maglim]
     return ret
 
+
+def teff(infile,nside=NSIDE,mode='median'):
+    TEFFS = bfields('TEFF',BANDS)
+
+    print infile
+    ret = dict()
+    for band,teff in zip(BANDS,TEFFS):
+        data = fitsio.read(infile,columns=['RA','DEC',teff])
+        pix = ang2pix(nside,data['RA'],data['DEC'])
+        hpx = np.unique(pix)        
+
+        if mode.lower() is 'median':
+            teff_value = nd.median(data[teff],labels=pix,index=hpx)
+        elif mode.lower() is 'mean':
+            teff_value = nd.mean(data[teff],labels=pix,index=hpx)
+p        else:
+            msg = 'Unrecognized mode: %s'%mode
+            raise Exception(msg)
+
+        ret[band] = [hpx,maglim]
+    return ret
+
+
 if __name__ == "__main__":
     import argparse
-    description = "python script"
+    description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    opts = parser.parse_args()
+    parser.add_argument('config',nargs='?')
+    parser.add_argument('-n','--nside',default=1024,type=int)
+    args = parser.parse_args()
+
+    if args.config:
+        config = yaml.load(open(args.config))
+        BANDS = config['bands']
+
+    NSIDE = args.nside
 
     outdir = mkdir('release/depth')
 
@@ -188,7 +214,7 @@ if __name__ == "__main__":
 
         plt.figure()
         vmin,vmax = maglim_range(skymap)
-        im = footprint.draw_footprint(skymap,vmin=vmin,vmax=vmax)
+        im = draw_footprint(skymap,vmin=vmin,vmax=vmax)
         plt.colorbar(im,label=r'Magnitude Limit (mag)')
         plt.title(r'10$\sigma$ Limiting Magnigude (%s-band)'%b)
         outfile = join(outdir,'y2q1_maglim_%s_n%i_car.png'%(b,NSIDE))

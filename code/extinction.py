@@ -16,13 +16,16 @@ import pandas as pd
 import numpy as np
 import fitsio
 import healpy
+import healpy as hp
 
 # These are some packages that are hanging around
 import ugali.utils.healpix as healpix
 from ugali.utils.projector import cel2gal
 import utils
+from ugali.utils.logger import logger
 
-BANDS = ['g','r','i','z','Y']
+
+BANDS = ['g','r','i','z','Y','y']
 
 # Rv = 3.1
 # Schlafly & Finkbeiner ApJ 737, 103 (2011)
@@ -32,26 +35,32 @@ SCHLAFLY11 = odict([
         ('i',1.595), 
         ('z',1.217), 
         ('Y',1.058), 
+        ('y',1.058),
         ])
 
 # Rv = 3.1
 # A dictionary of A(Lambda)/E(B-V) values for a flat SED with Rv=3.10
 # https://dessvn.cosmology.illinois.edu/websvn/desdm/devel/extinction
 # https://dessvn.cosmology.illinois.edu/websvn/desdm/devel/extinction/trunk/python/extinction/extinction_tools.py
-DESEXT = odict([
-        # From 02/2012
-        #('g',3.704722),
-        #('r',2.610357),
-        #('i',1.947345),
-        #('z',1.496843),
-        #('Y',1.311188),
-        # From 03/2013
+OLD_DESDM =  odict([
+        # From filter scans on 02/2012
+        ('g',3.704722),
+        ('r',2.610357),
+        ('i',1.947345),
+        ('z',1.496843),
+        ('Y',1.311188),
+        ('y',1.311188),
+])
+
+DESDM = odict([
+        # From filter scans on 03/2013
         ('u', 4.708272),
         ('g', 3.682995),
         ('r', 2.604808),
         ('i', 1.940133), 
         ('z', 1.450496),
         ('Y', 1.277421),
+        ('y', 1.277421),
         ])
 
 OUTCOLS  = ['EXTINCTION','EBV']
@@ -92,31 +101,25 @@ def writefile(filename,data,force=False):
         msg = "Unrecognized file extension: %s"%ext
         raise Exception(msg)
 
-def extinction(ra,dec,band,ebvmap=None):
+def ebv(ra,dec,ebvmap=None):
     ra = np.atleast_1d(ra)
     dec = np.atleast_1d(dec)
 
-    if isinstance(band,basestring):
-        band = np.array(len(ra)*[band])
-
-    if not len(ra) == len(dec) == len(band):
+    if not len(ra) == len(dec):
         msg = "Column lengths must match"
         raise Exception(msg)
-
-    out = np.recarray(len(ra),dtype=[(n,'f4') for n in OUTCOLS])
-    out.fill(0)
 
     if ebvmap is None or ebvmap.lower() == 'sfd':
         # Download SFD map
         url = "http://lambda.gsfc.nasa.gov/data/foregrounds/SFD/lambda_sfd_ebv.fits"
-        logging.info("Downloading %s..."%url)
+        logger.info("Downloading %s..."%url)
         filename = tempfile.NamedTemporaryFile().name
         cmd = "wget %s -O %s"%(url,filename)
         subprocess.call(cmd,shell=True)
         ebvmap = healpy.read_map(filename)
         os.remove(filename)
     elif isinstance(ebvmap,basestring):
-        logging.info("Loading %s..."%ebvmap)
+        logger.info("Loading %s..."%ebvmap)
         ebvmap = healpy.read_map(ebvmap)
     else:
         msg = "Unrecognized ebv: %s"%ebvmap
@@ -125,61 +128,91 @@ def extinction(ra,dec,band,ebvmap=None):
     # The SFD map is in Galactic coordinates
     glon,glat = cel2gal(ra,dec)
     ebv = healpix.get_interp_val(ebvmap,glon,glat)
-    out['EBV'] = ebv
-    
-    bands,inv = np.unique(band,return_inverse=True)
-    values = np.array([DESEXT[b] for b in bands])
-    out['EXTINCTION'] = values[inv] * ebv
+    return ebv
 
-    return out
+def extinction(ebv,band):
+    """
+    Calculate the extinction from the E(B-V) value and the band.
+    
+    ebv  : The dust value
+    band : The DES band (string or array)
+    """
+    if isinstance(band,basestring):
+        band = np.repeat(band,len(ebv))
+        
+    bands,inv = np.unique(band,return_inverse=True)
+    values = np.array([DESDM[b] for b in bands])
+    return values[inv] * ebv
 
 if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('infile',help='input file')
-    parser.add_argument('outfile',nargs='?',help='output file [optional]')
+    parser.add_argument('outfile',nargs='?',help='output file')
     parser.add_argument('-e','--ebv',default='SFD',
                         help='E(B-V) name or file')
     parser.add_argument('--ra',default='RA',
                         help='name of right ascension column')
     parser.add_argument('--dec',default='DEC',
                         help='name of declination column')
-    parser.add_argument('--band',default='BAND',
-                        help='name of band column')
+    parser.add_argument('-b','--bands',default=[],action='append',
+                        help='bands to calculate extinction')
     parser.add_argument('--ext',default='EXTINCTION',
-                        help='name of output column')
+                        help='name of extinction output column')
     parser.add_argument('-f','--force',action='store_true',
                         help='overwrite output columns if they exist')
+    parser.add_argument('-v','--verbose',action='store_true',
+                        help='output verbosity')
     args = parser.parse_args()
 
-    logging.getLogger().setLevel(logging.INFO)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
 
-    logging.info("Reading %s..."%args.infile)
+    logger.info("Reading %s..."%args.infile)
 
     columns = [args.ra,args.dec]
-    if args.band in BANDS:
-        band = args.band
+
+    if len(args.bands) == 0:
+        args.bands = BANDS
+    elif len(args.bands) == 1 and args.bands[0] not in BANDS:
+        columns += args.bands[0]
+        bands = None
     else:
-        columns += [args.band]
-        band = None
+        bands = args.bands
 
     data = readfile(args.infile,columns)
     ra = data[args.ra]
     dec = data[args.dec]
-    
-    if not band: 
-        band = data[args.band]
 
-    logging.info("Calculating extinction %s..."%args.ebv)
-    out = extinction(ra,dec,band,args.ebv)
+    logger.info("Calculating E(B-V): %s..."%args.ebv)
+    ebvval = ebv(ra,dec,args.ebv)
+
+    values = [ebvval]
+    dtypes = [('EBV','f4')]
+
+    logger.info("Calculating extinction %s..."%args.ebv)
+    for b in args.bands:
+        if b in DESDM:
+            band = np.repeat(b,len(ra))
+            extname = args.ext + '_%s'%b.upper()
+        else:
+            band = data[b]
+            extname = args.ext
+
+        extval = extinction(ebvval,band)
+        values.append(extval)
+        dtypes.append((extname,'f4'))
+
+    out = np.rec.fromarrays(values,dtype=dtypes)
     
     # Writing...
     if not args.outfile: 
         args.outfile = args.infile
     else: 
-        logging.debug("Copying %s to %s..."%(args.infile,args.outfile))
+        logger.debug("Copying %s to %s..."%(args.infile,args.outfile))
         shutil.copy(args.infile,args.outfile)
-    logging.info("Writing %s..."%args.outfile)
+
+    logger.info("Writing %s..."%args.outfile)
     writefile(args.outfile,out,force=args.force)
-    logging.info("Done.")
+    logger.info("Done.")

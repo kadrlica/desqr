@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=2,type=float)
+    parser.add_argument('-n','--njobs',default=None,type=int)
     parser.add_argument('-q','--queue',default='condor')
     parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()
@@ -41,7 +42,7 @@ if __name__ == "__main__":
         for exp in exposures[exposures['band'] == band]:
             if (tags is not None) and (exp['tag'] not in tags):
                 continue
-            unitname = exp['unitname']
+            unitname = 'D%08d'%(exp['expnum'])
             outbase = '%s_%s_cat.fits'%(unitname,band)
             outfile = os.path.join(outdir,outbase)
             if os.path.exists(outfile) and not args.force:
@@ -50,13 +51,17 @@ if __name__ == "__main__":
             sqlfile = os.path.join(sqldir,outbase.replace('.fits','.sql'))
             logfile = os.path.join(logdir,outbase.replace('.fits','.log'))
             params = (exp['tag'],exp['expnum'],exp['reqnum'],exp['attnum'],
-                      '-f' if args.force else '',sqlfile,outfile)
-            cmd = "download.py -t %s -e %s -r %s -a %s %s -l %s %s"%params
+                      exp['pfw_attempt_id'],'-f' if args.force else '',
+                      sqlfile,outfile)
+                      
+            cmd = "download.py -t %s -e %s -r %s -a %s -p %s %s -l %s %s"%params
             if args.queue == 'local':
                 submit = cmd
             else:
-                submit = "csub -o %s %s"%(logfile,cmd)
-            if args.verbose: print cmd
+                submit = 'csub -o %s '%(logfile)
+                if args.njobs: submit += '-n %s '%args.njobs
+                submit += cmd
+            if args.verbose: print submit
             subprocess.call(submit,shell=True)
             time.sleep(args.sleep)
 

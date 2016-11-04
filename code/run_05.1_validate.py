@@ -29,12 +29,12 @@ if __name__ == "__main__":
     for pix in pixels:
         basename = 'cat_hpx_%05d.fits'%pix
         catfile = os.path.join(catdir,basename)
-
+        logfile = 'plots/validate_%05d.log'%pix
         cmd = 'validate.py --pix %s'%pix
 
         if opts.queue == 'local':
             submit = cmd
         else:
-            submit = 'csub %s'%(cmd)
+            submit = 'csub -o %s %s'%(logfile,cmd)
         subprocess.call(submit,shell=True)
         if opts.queue != 'local': time.sleep(opts.sleep)

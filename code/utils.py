@@ -99,7 +99,11 @@ def write(filename,data,header=None,force=False):
     fitsio.write(filename,data,header=header,clobber=force)
 
 def insert_columns(filename,data,ext=1,force=False):
-    logger.info(filename)
+    #logger.info(filename)
+    if not os.path.exists(filename):
+        msg = "Requested file does not exist."
+        raise IOError(msg)
+
     fits = fitsio.FITS(filename,'rw')
     names = fits[ext].get_colnames()
     overlap = np.in1d(data.dtype.names,names)
@@ -243,6 +247,12 @@ def load_infiles(infiles,columns=None,multiproc=False):
 
 def uid(expnum,ccdnum):
     return expnum + ccdnum/100.
+
+def ruid(uid):
+    uid = np.asarray(uid)
+    expnum = np.floor(uid).astype(int)
+    ccdnum = np.round(100 * (uid%1)).astype(int)
+    return expnum,ccdnum
 
 def pix2ang(nside, pix, nest=False):
     """

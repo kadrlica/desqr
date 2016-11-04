@@ -242,6 +242,7 @@ if __name__ == "__main__":
             maglim = (mag[argmax] + mag[argmax-1])/2.
             if i==1: plot_peak(maglim,'%.1f'%maglim,color=c,lw=1.5,ls='--')
             plt.axhline(0.1,color='gray',lw=1.5,ls='--')
+        plt.xlim(16,25); plt.ylim(0,0.5)
         plt.xlabel('MAG_PSF')
         plt.xlabel('MAGERR_PSF')
         plt.legend(loc='upper left',fontsize=10)

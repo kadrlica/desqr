@@ -22,29 +22,36 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
-    # Sometimes sleep needs to be 30s or more...
-    parser.add_argument('-s','--sleep',default=5,type=float)
+    parser.add_argument('-s','--sleep',default=1,type=float)
     parser.add_argument('-n','--njobs',default=15,type=int)
     parser.add_argument('-q','--queue',default='condor')
+    parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))
     hpxdir = config['hpxdir']
     logdir = mkdir(os.path.join(hpxdir,'log'))
     radius = config['radius']
-    #OBJECT_ID = config['objid']
     force = '-f' if args.force else ''
     
-    for pix in np.arange(healpy.nside2npix(config['nside'])):
+    if args.pix: pixels = args.pix
+    else: pixels = np.arange(healpy.nside2npix(config['nside']))
+        
+    for pix in pixels:
         infiles = glob.glob(hpxdir+'/*/*%05d*.fits'%pix)
         if len(infiles) == 0: continue
 
-        fits = fitsio.FITS(infiles[0])
-        if OBJECT_ID in fits[1].get_colnames() and not args.force:
-            print "Found column '%s'; skipping..."%OBJECT_ID
+        done = (not args.force)
+        for f in infiles:
+            if not done: break
+            fits = fitsio.FITS(f)
+            done = (OBJECT_ID in fits[1].get_colnames())
             fits.close()
+
+        # Not really necessary to compare with force again...
+        if done and not args.force: 
+            print "Found column '%s'; skipping %05d..."%(OBJECT_ID,pix)
             continue
-        fits.close()
 
         logfile = os.path.join(logdir,'hpx_%05d.log'%pix)
 

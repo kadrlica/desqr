@@ -87,7 +87,9 @@ if __name__ == "__main__":
     parser.add_argument('-o','--outbase',default=HPXBASE)
     parser.add_argument('-n','--nside',default=16,type=int)
     parser.add_argument('-f','--force',action='store_true')
+    parser.add_argument('-v','--verbose',action='store_true')
     opts = parser.parse_args()
-    
+
+    if opts.verbose: logger.setLevel(logger.DEBUG)
     infiles = sorted(glob.glob(opts.indir+'/*.fits'))
     pixelize(infiles,opts.outdir,opts.outbase,nside=opts.nside,force=opts.force)

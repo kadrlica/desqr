@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 import glob
-import os
+import os,sys
 import time
 from os.path import join
 import subprocess
 import matplotlib
 try:             os.environ['DISPLAY']
 except KeyError: matplotlib.use('Agg')
+matplotlib.use('Agg')
 from multiprocessing import Pool
+import logging
 
 import fitsio
 import numpy as np
@@ -27,7 +29,10 @@ from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
 from utils import bfields, load_infiles
 from footprint import blank,unseen
 import footprint
+import plotting
 from plotting import draw_footprint, draw_peak
+
+NSIDE = 1024
 
 def draw_maglim_hist(skymap,**kwargs):
     maglims = skymap[skymap > 0]
@@ -66,7 +71,7 @@ def draw_maglim_pixel(skymap,**kwargs):
     nside = healpy.npix2nside(len(skymap))
     pix = np.where(skymap > 0)
     if len(pix[0]) == 0:
-        print "No maglims found"
+        logging.warn("No maglims found")
         return
 
     ra,dec = pix2ang(nside,pix)
@@ -105,7 +110,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
     # magerr = -2.5/ln(10) * fluxerr/flux
     mag_snr = (2.5/np.log(10)) / (signal_to_noise)
 
-    print infile
+    logging.info(infile)
     ret = dict()
     for band,mag,magerr,spread in zip(BANDS,MAGS,MAGERRS,SPREADS):
         data = fitsio.read(infile,columns=['RA','DEC',mag,magerr,spread])
@@ -117,7 +122,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
 
         d = data[cut]
         if len(d) < 2:
-            print "WARNING: Insufficent objects in %s-band"%band
+            logging.warn("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -134,7 +139,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
         np.seterr(**old)
 
         if cut_nan_inf.sum() < 2:
-            print "WARNING: Insufficent objects in %s-band"%band
+            logging.warn("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -155,7 +160,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
 def teff(infile,nside=NSIDE,mode='median'):
     TEFFS = bfields('TEFF',BANDS)
 
-    print infile
+    logging.info(infile)
     ret = dict()
     for band,teff in zip(BANDS,TEFFS):
         data = fitsio.read(infile,columns=['RA','DEC',teff])
@@ -166,7 +171,7 @@ def teff(infile,nside=NSIDE,mode='median'):
             teff_value = nd.median(data[teff],labels=pix,index=hpx)
         elif mode.lower() is 'mean':
             teff_value = nd.mean(data[teff],labels=pix,index=hpx)
-p        else:
+        else:
             msg = 'Unrecognized mode: %s'%mode
             raise Exception(msg)
 
@@ -179,9 +184,14 @@ if __name__ == "__main__":
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config',nargs='?')
-    parser.add_argument('-n','--nside',default=1024,type=int)
+    parser.add_argument('-n','--nside',default=NSIDE,type=int)
+    parser.add_argument('-v','--verbose',action='store_true')
+    parser.add_argument('-s','--survey',default='des')
     args = parser.parse_args()
 
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO,stream=sys.stdout)
+    
     if args.config:
         config = yaml.load(open(args.config))
         BANDS = config['bands']
@@ -191,17 +201,22 @@ if __name__ == "__main__":
     outdir = mkdir('release/depth')
 
     infiles = sorted(glob.glob('cat/cat_hpx_*.fits'))
+    
     p = Pool(maxtasksperchild=1)
     out = p.map(depth,infiles)
 
     skymaps = dict()
     for b in BANDS:
+        logging.info("Filling %s-band..."%b)
         skymap = blank(NSIDE)
-        for maglims in out:
+        for i,maglims in enumerate(out):
+            logging.info(str(i))
             skymap[maglims[b][0]] = maglims[b][1]
         skymaps[b] = np.ma.MaskedArray(skymap,np.isnan(skymap),fill_value=np.nan)
         outfile = join(outdir,'y2q1_maglim_%s_n%i_ring.fits'%(b,NSIDE))
+        logging.info("Writing %s..."%outfile)
         healpy.write_map(outfile,skymaps[b].data)
+        logging.info("Gzipping %s..."%outfile)
         subprocess.call('gzip -f %s'%outfile,shell=True)
         
     out = dict()
@@ -214,7 +229,12 @@ if __name__ == "__main__":
 
         plt.figure()
         vmin,vmax = maglim_range(skymap)
-        im = draw_footprint(skymap,vmin=vmin,vmax=vmax)
+        if args.survey == 'des':
+            im = plotting.draw_des(skymap,vmin=vmin,vmax=vmax)
+        elif args.survey == 'maglites':
+            im = plotting.draw_maglites(skymap,vmin=vmin,vmax=vmax)
+        else:
+            im = plotting.draw_footprint(skymap,vmin=vmin,vmax=vmax)
         plt.colorbar(im,label=r'Magnitude Limit (mag)')
         plt.title(r'10$\sigma$ Limiting Magnigude (%s-band)'%b)
         outfile = join(outdir,'y2q1_maglim_%s_n%i_car.png'%(b,NSIDE))

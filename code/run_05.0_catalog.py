@@ -16,13 +16,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=2,type=float)
+    parser.add_argument('-s','--sleep',default=1,type=float)
+    parser.add_argument('-n','--njobs',default=20,type=int)
     parser.add_argument('-q','--queue',default='condor')
-    opts = parser.parse_args()
+    args = parser.parse_args()
     
-    force = '-f' if opts.force else ''
+    force = '-f' if args.force else ''
 
-    config = yaml.load(open(opts.config))
+    config = yaml.load(open(args.config))
     hpxdir = config['hpxdir']
     catdir = mkdir(config['catdir'])
     keydir = mkdir(config['keydir'])
@@ -37,7 +38,7 @@ if __name__ == "__main__":
 
         if len(infiles) == 0: continue
 
-        if os.path.exists(outfile) and not opts.force:
+        if os.path.exists(outfile) and not args.force:
             found(outfile)
             continue
 
@@ -47,10 +48,12 @@ if __name__ == "__main__":
         params=(' '.join(infiles),outfile,keyfile,bands,minbands,force)
         cmd = 'catalog.py -v %s -o %s -k %s %s %s %s'%params
 
-        if opts.queue == 'local':
+        if args.queue == 'local':
             print cmd
             submit = cmd
         else:
-            submit = 'csub -o %s %s'%(logfile,cmd)
+            #submit = 'csub -o %s %s'%(logfile,cmd)
+            submit = 'csub -o %s -n %s %s'%(logfile,args.njobs,cmd)
+
         subprocess.call(submit,shell=True)
-        if opts.queue != 'local': time.sleep(opts.sleep)
+        if args.queue != 'local': time.sleep(args.sleep)

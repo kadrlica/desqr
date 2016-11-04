@@ -9,6 +9,7 @@ from collections import OrderedDict as odict
 import numpy as np
 np.seterr(divide='ignore')
 import fitsio
+import pandas as pd
 
 from ugali.utils.logger import logger
 import utils
@@ -35,7 +36,7 @@ def read_blacklist(blacklist):
     if isinstance(blacklist,basestring):
         ext = os.path.splitext(blacklist)[-1]
         if ext == '.csv':
-            bl = np.recfromcsv(blacklist)
+            bl = pd.read_csv(blacklist).to_records()
         elif ext == '.fits':
             bl = fitsio.read(blacklist)
         else:
@@ -62,7 +63,8 @@ def read_zeropoint(zeropoint,blacklist=None):
 
     ext = os.path.splitext(zeropoint)[-1]
     if ext == '.csv':
-        zp = np.recfromcsv(zeropoint)
+        #zp = np.recfromcsv(zeropoint)
+        zp = pd.read_csv(zeropoint).to_records()
     elif ext == '.fits':
         zp = fitsio.read(zeropoint,ext=1,columns=ZPCOLS)
     else:
@@ -88,7 +90,6 @@ def read_zeropoint(zeropoint,blacklist=None):
         return zp
     else:
         bl = read_blacklist(blacklist)
-
         # Unique value from EXPNUM, CCDNUM
         zpval = utils.uid(zp['EXPNUM'],zp['CCDNUM'])
         blval = utils.uid(bl['EXPNUM'],bl['CCDNUM'])

@@ -142,12 +142,16 @@ def check_columns(args,columns=None,select=None,msg=None):
         print color(msg,'red')
         return True
     
-    sel = select(data) 
+    sel = select(data)
     if np.any(sel):
-        if not msg: msg = "Bad %(columns)s value in %(filename)s"
-        msg = msg%dict(columns=columns,filename=f)
-        print color(msg,'red')
-        print 4*' '+bad_values_str(data[sel])
+        #if not msg: msg = "Bad %(columns)s value in %(filename)s"
+        #msg = msg%dict(columns=columns,filename=f)
+        if msg: 
+            print msg%dict(columns=columns,filename=f)
+        if not isinstance(sel,bool):
+            msg = "Bad %(columns)s value in %(filename)s"
+            print msg%dict(columns=columns,filename=f)
+            print 4*' '+bad_values_str(data[sel])
         return True
 
     return False
@@ -194,10 +198,10 @@ def check_match(args):
         frac = (x > 0).sum()/nobjs
         bad = (frac < 0.1) and (nobjs > 1e4)
         if bad:
-            msg = 'Match fraction = %.2f'%frac
-            print color(msg,'yellow')
+            msg = 'Match fraction = %.2f;'%frac
+            print color(msg,'yellow'),
         return bad
-    msg = "Poor %(columns)s match in %(filename)s"
+    msg = color("Poor match in %(filename)s",'yellow')
     kwargs = dict(columns=bfields('NEPOCHS',band),select=select,msg=msg)
     return check_columns(args,**kwargs)
 

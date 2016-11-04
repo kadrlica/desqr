@@ -58,46 +58,61 @@ def draw_hist(skymap,**kwargs):
     return quantiles,percentiles
 
 def draw_footprint(skymap,proj='car',**kwargs):
-
+    """
+    Draw plot of footprint.
+    """
     if not isinstance(skymap,np.ma.MaskedArray):
         mask = ~np.isfinite(skymap) | (skymap==healpy.UNSEEN)
         skymap = np.ma.MaskedArray(skymap,mask=mask)
     pix = np.where(~skymap.mask)
 
     vmin,vmax = np.percentile(skymap[pix],[0.5,99.5])
+    #vmin,vmax = np.percentile(skymap[pix],[0.5,99])
 
     kwargs.setdefault('vmin',vmin)
     kwargs.setdefault('vmax',vmax)
     kwargs.setdefault('rasterized',True)
-    kwargs.setdefault('cmap','jet')
+    kwargs.setdefault('cmap','viridis')
+    extent = kwargs.pop('extent',[180,-180,-90,20])
+    xmin,xmax,ymin,ymax = extent
 
     nside = healpy.npix2nside(len(skymap))
 
-    xmin,xmax = -70,110
-    ymin,ymax = -70,10
-    # desgw
-    #xmin,xmax = 30,180
-    #ymin,ymax = -80,-50
-    # maglites
-    xmin,xmax = 80,280
-    ymin,ymax = -90,-50
-
-    delta = 0.1
-    xx,yy = np.meshgrid(np.arange(xmin,xmax,delta),np.arange(ymin,ymax,delta))
+    steps = 500
+    xx,yy = np.meshgrid(np.linspace(xmin,xmax,steps),
+                        np.linspace(ymin,ymax,steps))
     pp = ang2pix(nside,xx,yy)
 
     ax = plt.gca()
     im = ax.pcolormesh(xx[::-1],yy,skymap[pp],**kwargs)
     ax.set_xlabel('RA (deg)')
     ax.set_ylabel('DEC (deg)')
-    #ax.set_xticks([90,60,30,0,-30,-60])
-    #ax.set_yticks([-70,-50,-30,-10,10])
-    #ax.set_xticks(np.arange(180,-180-30,-30))
-    #ax.set_yticks(np.arange(-90,90+20,20))
-    ax.set_xlim(xmax,xmin)
+    ax.set_xlim(xmin,xmax)
     ax.set_ylim(ymin,ymax)
+
     ax.grid()
     return im
+
+def draw_des(skymap,proj='car',**kwargs):
+    """ 
+    Draw DES footprint:
+       110 > RA > -70, -70 < DEC < 10
+    """
+    kwargs.setdefault('extent',[110,-70,-70,10])
+    return draw_footprint(skymap,proj,**kwargs)
+
+def draw_maglites(skymap,proj='car',**kwargs):
+    """ 
+    Draw MagLiteS footprint:
+       280 > RA > 80, -90 < DEC < -50
+    """
+    kwargs.setdefault('extent',[280,80,-90,-50])
+    im = draw_footprint(skymap,proj,**kwargs)
+    return im
+
+def draw_desgw(skymap,proj='car',**kwargs):
+    kwargs.setdefault('extent',[180,30,-80,-50])
+    return draw_footprint(skymap,proj,**kwargs)
 
 def draw_pixel(skymap,**kwargs):
     if isinstance(skymap,np.ma.MaskedArray):

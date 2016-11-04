@@ -62,8 +62,17 @@ ADD CONSTRAINT Y2Q1_OBJECTS_PK PRIMARY KEY (CATALOG_ID);
     return query
 
 def create_bitmap_index(column,index=None,table='Y2Q1_OBJECTS_V1'):
-    if index is None: index = 'Y2Q1_%s_BMX'%column
+    if index is None: 
+        release = table.split('_')[0]
+        index = '%s_%s_BMX'%(release,column)
     query = "create bitmap index %(index)s on %(table)s(%(column)s);"
+    return query%dict(column=column,index=index,table=table)
+
+def drop_index(column,index=None,table='Y2Q1_OBJECTS_V1'):
+    if index is None: 
+        release = table.split('_')[0]
+        index = '%s_%s_BMX'%(release,column)
+    query = "drop index %(index)s;"
     return query%dict(column=column,index=index,table=table)
 
 def y1a1_object_query(expnum=None):
@@ -121,6 +130,71 @@ and o.YWIN_IMAGE between 15 and 4096-30;"""%kwargs
 
 y2n_object_query = se_object_query
 
+def old_y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
+    """
+    Query to download catalog objects from the single-epoch images in the
+    refactored system.
+    """
+    # Robert suggests the CCDNUM can come from:
+    #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
+    # William would like A_IMAGE,B_IMAGE, and THETA_IMAGE
+    # Moved to using qa_summary for teff values
+    kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
+    kwargs['unitname'] = 'D%(expnum)08d'%kwargs
+    kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
+    kwargs['tag'] = tag
+    query = """-- Single-epoch catalog download
+-- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
+SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
+CAST(t.UNITNAME AS VARCHAR(9)) as UNITNAME, t.REQNUM, t.ATTNUM, 
+CAST(t.tag AS VARCHAR(13)) as TAG,
+qa.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
+CAST(o.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, o.FWHM_WORLD, o.FLAGS, 
+o.OBJECT_NUMBER, 
+o.RA, o.DEC,
+o.FLUX_PSF, o.FLUXERR_PSF,
+o.FLUX_AUTO, o.FLUXERR_AUTO,
+o.A_IMAGE, o.B_IMAGE, o.THETA_IMAGE,
+o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
+FROM prod.se_object o, prod.qa_summary qa, prod.proctag t
+WHERE o.filename like '%(filename)s'
+and t.unitname='%(unitname)s' and t.reqnum=%(reqnum)i and t.attnum=%(attnum)i
+and t.tag = '%(tag)s' and t.pfw_attempt_id=qa.pfw_attempt_id
+and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
+and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
+and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
+    return query
+
+def pfw_object_query(pfw_attempt_id,tag='Y3A1_FINALCUT'):
+    """
+    Query to download single-epoch catalog objects using PFW_ATTEMPT_ID.
+    """
+    # CAST strings to save space
+    kwargs = dict(pfw_attempt_id=pfw_attempt_id,tag=tag)
+    query = """-- Single-epoch catalog download
+-- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
+-- CAST strings to save space
+SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
+p.ID as PFW_ATTEMPT_ID, CAST(t.tag AS VARCHAR(13)) as TAG,
+CAST(p.UNITNAME AS VARCHAR(9)) as UNITNAME, p.REQNUM, p.ATTNUM, 
+qa.EXPNUM, c.CCDNUM,
+CAST(o.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, o.FWHM_WORLD, o.FLAGS, 
+o.OBJECT_NUMBER, 
+o.RA, o.DEC,
+o.FLUX_PSF, o.FLUXERR_PSF,
+o.FLUX_AUTO, o.FLUXERR_AUTO,
+o.A_IMAGE, o.B_IMAGE, o.THETA_IMAGE,
+o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
+FROM prod.se_object o, prod.qa_summary qa, prod.proctag t, 
+prod.pfw_attempt p, prod.catalog c
+WHERE p.id = %(pfw_attempt_id)i and p.id = c.pfw_attempt_id
+and p.id = t.pfw_attempt_id and p.id = qa.pfw_attempt_id
+and t.tag = '%(tag)s' and o.filename = c.filename
+and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
+and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
+and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
+    return query
+
 def y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
     """
     Query to download catalog objects from the single-epoch images in the
@@ -129,6 +203,7 @@ def y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
     # Robert suggests the CCDNUM can come from:
     #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
     # William would like A_IMAGE,B_IMAGE, and THETA_IMAGE
+    # Moved to using qa_summary for teff values
     kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
     kwargs['unitname'] = 'D%(expnum)08d'%kwargs
     kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
@@ -136,24 +211,28 @@ def y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT'):
     query = """-- Single-epoch catalog download
 -- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
 SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
-CAST(ev.UNITNAME AS VARCHAR(9)) as UNITNAME, ev.REQNUM, ev.ATTNUM, 
-CAST('%(tag)s' AS VARCHAR(13)) as TAG,
-ev.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
-CAST(o.BAND AS VARCHAR(1)) AS BAND, ev.T_EFF, o.FWHM_WORLD, o.FLAGS, 
+p.id as PFW_ATTEMPT_ID,
+CAST(p.UNITNAME AS VARCHAR(9)) as UNITNAME, p.REQNUM, p.ATTNUM, 
+CAST(t.tag AS VARCHAR(13)) as TAG,
+qa.EXPNUM, c.CCDNUM,
+CAST(o.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, o.FWHM_WORLD, o.FLAGS, 
 o.OBJECT_NUMBER, 
 o.RA, o.DEC,
 o.FLUX_PSF, o.FLUXERR_PSF,
 o.FLUX_AUTO, o.FLUXERR_AUTO,
-o.A_IMAGE,o.B_IMAGE,o.THETA_IMAGE,
+o.A_IMAGE, o.B_IMAGE, o.THETA_IMAGE,
 o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL 
-FROM prod.se_object o, prod.finalcut_eval ev
+FROM prod.se_object o, prod.qa_summary qa, prod.proctag t, 
+prod.pfw_attempt p, prod.catalog c
 WHERE o.filename like '%(filename)s'
-and ev.unitname='%(unitname)s' and ev.reqnum=%(reqnum)i and ev.attnum=%(attnum)i
+and p.unitname='%(unitname)s' and p.reqnum=%(reqnum)i and p.attnum=%(attnum)i
+and p.id = t.pfw_attempt_id and p.id = qa.pfw_attempt_id 
+and t.tag = '%(tag)s' 
+and o.filename = c.filename
 and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
 and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
 and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
     return query
-
 
 def y1a1_coadd_objects_query():
     query = """-- Y1A1 object download
@@ -214,6 +293,50 @@ ORDER BY ev.expnum;"""%(tag,program,tag)
     return query
 
 def finalcut_exposure_query(program='survey',tag='Y3A1_FINALCUT'):
+    if tag in ('Y2A1_FINALCUT','Y3A1_FINALCUT'):
+        tag = 'Y3A1_FINALCUT'
+
+    ### From Robert, the definition of qa.flag is:
+    ###
+    ###    1: Under Teff_Limit
+    ###    2: No T_eff possible
+    ###   10: FWHM: Exceed SeeingLimit for inclusion in survey
+    ###  
+    ###  100: Suspect Astrometry (ndets<100)&&(n_apass||n_nomad<100)
+    ###  200: Poor Astrometry (sigma)
+    ###  400: Poor Astrometry (offset)
+    ###  
+    ### 1000: Poor Sky Subtraction (skytilt > 0.02)
+    ### 2000: Extremely Poor SkySub (skytilt > 0.2)
+    ###  
+    ### 10000: Some CCDs present in the BLACKLIST.
+    ### 20000: All CCDs present in the BLACKLIST
+
+    ### To grab SV survey exposures we can't use program='survey';
+    ### instead use an exptime cut.
+    ###
+    ### FIXME: Add MJD and exposure time:
+    ### e.MJD_OBS, e.EXPTIME
+    query = """-- FINALCUT exposures that pass QA_SUMMARY *or* FINALCUT_EVAL
+SELECT t.PFW_ATTEMPT_ID, e.EXPNUM, 
+p.UNITNAME, TO_CHAR(p.REQNUM) AS REQNUM, TO_CHAR(p.ATTNUM) AS ATTNUM, 
+e.TRADEG as TELRA, e.TDECDEG as TELDEC, e.NITE, 
+CAST(e.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, qa.FLAG, t.TAG
+from prod.exposure e, prod.proctag t, prod.finalcut_eval ev, 
+prod.qa_summary qa, prod.pfw_attempt p
+WHERE t.pfw_attempt_id = qa.pfw_attempt_id 
+and t.pfw_attempt_id = ev.pfw_attempt_id
+and p.id = t.pfw_attempt_id
+and t.tag = '%(tag)s'
+and qa.expnum = e.expnum
+and qa.skytilt < 0.1
+and ((qa.flag < 20000 and MOD(qa.flag,1000)=0) or (qa.flag<=3 and ev.accepted='True'))
+and e.exptime between 44.5 and 90.5
+ORDER BY e.expnum;"""%dict(tag=tag)
+    return query
+
+
+def old_finalcut_exposure_query(program='survey',tag='Y3A1_FINALCUT'):
     if tag in ('Y2A1_FINALCUT','Y3A1_FINALCUT'):
         tag = 'Y3A1_FINALCUT'
 
@@ -317,6 +440,18 @@ ORDER BY expnum, ccdnum;"""
 
 qslr_query = y2q_zeropoint_query
 
+def y3a1_zeropoint_query():
+    query = """-- fGCM zeropoints
+select z.EXPNUM, z.CCD as CCDNUM,
+CAST(z.BAND AS VARCHAR(1)) AS BAND, 
+z.RA_CENT as RA, z.DEC_CENT as DEC,
+z.FGCM_ZPT as MAG_ZERO, z.FGCM_ZPTERR as SIGMA_MAG_ZERO,
+z.FGCM_FLAG as ZP_FLAG
+from erykoff.Y3A1_FGCM_Y1Y2Y3_V1_0@dessci z
+order by expnum, ccdnum;"""
+    return query
+
+
 def gcm_query():
     query = """-- Select Y1A1 GCM zeropoints
 select EXPNUM, CCD AS CCDNUM, 
@@ -416,22 +551,26 @@ if __name__ == "__main__":
     parser.add_argument('-e','--expnum',default=None,type=int)
     parser.add_argument('-r','--reqnum',default=None,type=int)
     parser.add_argument('-a','--attnum',default=None,type=int)
+    parser.add_argument('-p','--pfw_attempt_id',default=None,type=int)
     parser.add_argument('-t','--tag',default=None,choices=TAGS)
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
     section = 'desoper'
-    if opts.tag in ['Y2N_FIRSTCUT','Y3N_FIRSTCUT','MAGLITES_FIRSTCUT']:
-        query = se_object_query(opts.expnum,opts.reqnum,opts.attnum)
-    elif opts.tag == 'Y1A1_FINALCUT':
-        query = y1a1_object_query(expnum=opts.expnum)
-    elif opts.tag == 'DESGW':
-        query = y2n_object_query(opts.expnum,opts.reqnum,opts.attnum)
-    elif opts.tag in ['Y2A1_FINALCUT','Y3A1_FINALCUT','Y3A1_MAGLITES']:
-        query = y3a1_object_query(opts.expnum,opts.reqnum,opts.attnum,tag=opts.tag)
+    if args.tag in ['Y2N_FIRSTCUT','Y3N_FIRSTCUT','MAGLITES_FIRSTCUT']:
+        query = se_object_query(args.expnum,args.reqnum,args.attnum)
+    elif args.tag == 'Y1A1_FINALCUT':
+        query = y1a1_object_query(expnum=args.expnum)
+    elif args.tag == 'DESGW':
+        query = y2n_object_query(args.expnum,args.reqnum,args.attnum)
+    elif args.tag in ['Y2A1_FINALCUT','Y3A1_MAGLITES']:
+        #query = y3a1_object_query(args.expnum,args.reqnum,args.attnum,tag=args.tag)
+        query = y3a1_object_query(args.expnum,args.reqnum,args.attnum,tag=args.tag)
+    elif args.tag in ['Y3A1_FINALCUT']:
+        query = pfw_object_query(args.pfw_attempt_id,args.tag)
     else:
-        raise Exception('Tag not found: %s'%opts.tag)
+        raise Exception('Tag not found: %s'%args.tag)
 
-    download(opts.outfile,query,opts.loadsql,section,opts.force)
+    download(args.outfile,query,args.loadsql,section,args.force)
 
     # Should be downloaded by default
-    #ccdnum(opts.outfile,force=True)
+    #ccdnum(args.outfile,force=True)

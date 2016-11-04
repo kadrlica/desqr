@@ -4,9 +4,10 @@ import os
 from os.path import join
 import yaml
 import matplotlib
-try:             os.environ['DISPLAY']
-except KeyError: matplotlib.use('Agg')
+if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
+    matplotlib.use('Agg')
 from collections import OrderedDict as odict
+import logging
 
 import fitsio
 import numpy as np
@@ -34,17 +35,22 @@ import plotting
 
 COLUMNS = [OBJECT_ID,'RA','DEC']
 
-
 CATALOGS = odict([
         ('2MASS',dict(catalog='II/246/out',
-                      columns=['2MASS','RAJ2000','DEJ2000','Jmag'])
+                      columns=['2MASS','_RAJ2000','_DEJ2000','Jmag'])
                       #column_filters={})
          ),
         ('UCAC4',dict(catalog='I/322A/out',
-                      columns=['UCAC4','RAJ2000','DEJ2000','Jmag'])
+                      columns=['UCAC4','_RAJ2000','_DEJ2000','Jmag'])
                       #,'pmRA','e_pmRA','pmDE','e_pmDE'],
                       #column_filters={})
          ),
+        ('GAIA',dict(catalog='I/337/gaia',
+                     columns=['Source','_RAJ2000','_DEJ2000','<Gmag>'])
+                     #,'pmRA','e_pmRA','pmDE','e_pmDE'],
+                     #column_filters={})
+         ),
+
         ])
 
 def hist_peak(bins,num):
@@ -86,7 +92,7 @@ def draw_astrometry_pixel(skymap,**kwargs):
 
 def draw_astrometry_footprint(skymap,**kwargs):
     """ skymap in units of mas """
-    im = plotting.draw_footprint(skymap,**kwargs)
+    im = plotting.draw_des(skymap,**kwargs)
     ax = plt.gca()
     plt.colorbar(im,label=r'Median Angular Separation (mas)')
 
@@ -130,7 +136,7 @@ def external_astrometry(catfile,catalog='2MASS',nside=64,band='r',plot=False):
     #print "Getting external catalog: %s"%catalog
     ext = get_vizier_catalog(ra,dec,radius,**CATALOGS[catalog])
 
-    m = match_query(cat['RA'],cat['DEC'],ext['RAJ2000'],ext['DEJ2000'])
+    m = match_query(cat['RA'],cat['DEC'],ext['_RAJ2000'],ext['_DEJ2000'])
 
     # Use a fairly wide matching radius (2 arcsec)
     cut = 2.0
@@ -277,121 +283,140 @@ if __name__ == "__main__":
     description = "python script"
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config',help='Configuration file.')
-    parser.add_argument('-o','--outbase',default='y2q1_astrom')
+    parser.add_argument('-o','--outbase',default='y3q2_astrom')
     parser.add_argument('-t','--title',default='Astrometric Precision')
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-n','--nside',default=128,type=int)
     parser.add_argument('-p','--pix',default=None,type=int,action='append')
-    parser.add_argument('-b','--band',default='r',choices=BANDS)
-    parser.add_argument('--type',choices=['internal','external'],
-                        default='external')
+    parser.add_argument('-b','--band',action='append',choices=BANDS)
+    parser.add_argument('--type',choices=['internal','external'],default='external')
+    parser.add_argument('--catalog',choices=CATALOGS.keys(),default='UCAC4')
     opts = parser.parse_args()
 
+    if not opts.band: opts.band = BANDS
+
     config = yaml.load(open(opts.config))
-    OBJECT_ID = config['objid']
+    OBJECT_ID = config.get('objid',OBJECT_ID)
     NSIDE = config['nside']
 
-    band = opts.band
     nside = opts.nside
-    npix = healpy.nside2npix(16)
+    npix = healpy.nside2npix(config['nside'])
     catdir = config['catdir']
-    hpxdir = config['hpxdir']
-    if opts.band is not None: hpxdir = join(hpxdir,band)
 
     outdir = mkdir('release/astrometry')
     outbase = opts.outbase
+    outbase += '_%s'%(opts.type[:3])
+    if opts.type == 'external':
+        outbase += '_%s'%(opts.catalog.lower())
 
-    if opts.pix is not None:
-        pixels = sorted([p for p in opts.pix if len(glob.glob(catdir+'/*%05d.fits'%p))])
-    else:
-        pixels = sorted([p for p in range(npix) if len(glob.glob(catdir+'/*%05d.fits'%p))])
+    skymaps = odict()
 
-    if len(pixels) == 0:
-        msg = "Invalid pixel: %s"%opts.pix
-        raise Exception(msg)
-
-    catfiles = [glob.glob(catdir+'/*%05d.fits'%p)[0] for p in pixels]
-    hpxfiles = [glob.glob(hpxdir+'/*%05d.fits'%p)[0] for p in pixels]
-
-    #catfiles = ['cat/y1a1_gold_1_0_2_01376.fits']
-    #hpxfiles = ['hpx/i/hpx_i_01376.fits']
-
-    # Args must be tuple
-    print "Processing %i files..."%len(catfiles)
-
-    if opts.type == 'internal':
-        args = zip(catfiles,hpxfiles)
-        kwargs = dict(nside=opts.nside,band=band)
-        astrometry = internal_astrometry
-    elif opts.type == 'external':
-        args = zip(catfiles,)
-        kwargs = dict(nside=opts.nside,band=band,catalog='UCAC4')
-        astrometry = external_astrometry
-    else:
-        raise Exception()
-
-    results = utils.multiproc(astrometry,args,kwargs)
-    #results = [astrometry(*args[-1],**kwargs)]
-
-    #args = [(pix,nside) for pix in pixels][:10]
-    #p = Pool(maxtasksperchild=1)
-    #out = p.map(astrometry,args)
-
-    skymap = blank(nside)
-
-    if None in results:
-        print "WARNING: %i processes failed..."%results.count(None)
-    for pix,peak in [r for r in results if r is not None]:
-        skymap[pix] = peak
-     
-    skymap = np.ma.MaskedArray(skymap,np.isnan(skymap),fill_value=np.nan)
+    for band in opts.band:
     
-    out = dict(band=band)
+        hpxdir = join(config['hpxdir'],band)
+         
+        if opts.pix is not None:
+            pixels = sorted([p for p in opts.pix if len(glob.glob(catdir+'/*%05d.fits'%p))])
+        else:
+            pixels = sorted([p for p in range(npix) if (len(glob.glob(catdir+'/*%05d.fits'%p)) and len(glob.glob(hpxdir+'/*%05d.fits'%p))) ])
+         
+        if len(pixels) == 0:
+            msg = "Invalid pixel: %s"%opts.pix
+            raise Exception(msg)
+         
+        catfiles = [glob.glob(catdir+'/*%05d.fits'%p)[0] for p in pixels]
+        hpxfiles = [glob.glob(hpxdir+'/*%05d.fits'%p)[0] for p in pixels]
+         
+        #catfiles = ['cat/y1a1_gold_1_0_2_01376.fits']
+        #hpxfiles = ['hpx/i/hpx_i_01376.fits']
+         
+        # Args must be tuple
+        print "Processing %i files..."%len(catfiles)
+         
+        if opts.type == 'internal':
+            args = zip(catfiles,hpxfiles)
+            kwargs = dict(nside=opts.nside,band=band)
+            astrometry = internal_astrometry
+        elif opts.type == 'external':
+            args = zip(catfiles,)
+            kwargs = dict(nside=opts.nside,band=band,catalog=opts.catalog.upper())
+            astrometry = external_astrometry
+        else:
+            raise Exception()
+         
+        results = utils.multiproc(astrometry,args,kwargs)
+        #results = [astrometry(*args[-1],**kwargs)]
+         
+        #args = [(pix,nside) for pix in pixels][:10]
+        #p = Pool(maxtasksperchild=1)
+        #out = p.map(astrometry,args)
+         
+        skymap = blank(nside)
+         
+        if None in results:
+            print "WARNING: %i processes failed..."%results.count(None)
+        for pix,peak in [r for r in results if r is not None]:
+            skymap[pix] = peak
+         
+        skymap = np.ma.MaskedArray(skymap,np.isnan(skymap),fill_value=np.nan)
+         
+        skymaps[band] = skymap
 
-    if opts.pix is not None:
-        pix = opts.pix[0]
-
-        plt.figure()
-        draw_astrometry_pixel(skymap)
-        plt.title(opts.title+" (%i; %s-band)"%(pix,band))
-        outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_car.png'%(band,pix,nside))
-        plt.savefig(outfile,bbox_inches='tight')
-        out['map'] = os.path.basename(outfile)
-
-        kwargs['plot']=True
-        utils.multiproc(astrometry,args,kwargs)
-        plt.title(opts.title+" (%i; %s-band)"%(pix,band))
-        outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_hist.png'%(band,pix,nside))
-        plt.savefig(outfile,bbox_inches='tight')
-        out['hist'] = os.path.basename(outfile)
-    else:
-        plt.figure()
-        draw_astrometry_footprint(skymap)
-        plt.title(opts.title+" (%s-band)"%band)
-        outfile = join(outdir,outbase+'_%s_n%i_car.png'%(band,nside))
-        plt.savefig(outfile,bbox_inches='tight')
-        out['map'] = os.path.basename(outfile)
-
-        plt.figure()
-        draw_astrometry_hist(skymap,bins=np.linspace(0,500,101))
-        plt.title(opts.title+" (%s-band)"%band)
-        outfile = join(outdir,outbase+'_%s_n%i_hist.png'%(band,nside))
-        plt.savefig(outfile,bbox_inches='tight')
-        out['hist'] = os.path.basename(outfile)
-
-        #outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
-        #healpy.write_map(outfile,skymap)
-
-    q = [5,50,95]
-    p = np.percentile(skymap.compressed(),q)
-    out['value'] = '/'.join(['%.0f'%_p for _p in p])
-    out['percentile'] = '/'.join(['%.0f'%_q for _q in q])
-    print "Global Median Angular Separation:"
-    print '%s (%s%%)'%(out['value'],out['percentile'])
-
+        q = [5,50,95]
+        p = np.percentile(skymap.compressed(),q)
+        print "Global Median Angular Separation:"
+        print '%s (%s%%)'%(p,q)
+         
     print '|_. Band |_. Median Separation Map |_. Median Separation Distribution |_. Astrometric Precision |'
     template = '|_. %(band)s |{{thumbnail(%(map)s, size=300)}}|{{thumbnail(%(hist)s, size=300)}}|_. %(value)s mas |'
-    outstr = template%out
-    print outstr
+            
+    for band,skymap in skymaps.items():
+        out = dict(band=band)
+         
+        if opts.pix is not None:
+            pix = opts.pix[0]
+         
+            plt.figure()
+            draw_astrometry_pixel(skymap)
+            plt.title(opts.title+" (%i; %s-band)"%(pix,band))
+            outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_car.png'%(band,pix,nside))
+            plt.savefig(outfile,bbox_inches='tight')
+            out['map'] = os.path.basename(outfile)
+         
+            kwargs['plot']=True
+            utils.multiproc(astrometry,args,kwargs)
+            plt.title(opts.title+" (%i; %s-band)"%(pix,band))
+            outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_hist.png'%(band,pix,nside))
+            plt.savefig(outfile,bbox_inches='tight')
+            out['hist'] = os.path.basename(outfile)
+         
+            outfile = join(outdir,outbase+'_%s_hpx%05d_n%i.fits'%(band,pix,nside))
+            healpy.write_map(outfile,skymap)
+         
+        else:
+            plt.figure()
+            draw_astrometry_footprint(skymap)
+            plt.title(opts.title+" (%s-band)"%band)
+            outfile = join(outdir,outbase+'_%s_n%i_car.png'%(band,nside))
+            plt.savefig(outfile,bbox_inches='tight')
+            out['map'] = os.path.basename(outfile)
+         
+            plt.figure()
+            draw_astrometry_hist(skymap,bins=np.linspace(0,500,101))
+            plt.title(opts.title+" (%s-band)"%band)
+            outfile = join(outdir,outbase+'_%s_n%i_hist.png'%(band,nside))
+            plt.savefig(outfile,bbox_inches='tight')
+            out['hist'] = os.path.basename(outfile)
+         
+            outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
+            healpy.write_map(outfile,skymap)
+
+
+        q = [5,50,95]
+        p = np.percentile(skymap.compressed(),q)
+        out['value'] = '/'.join(['%.0f'%_p for _p in p])
+        out['percentile'] = '/'.join(['%.0f'%_q for _q in q])
+        outstr = template%out
+        print outstr
 
     plt.ion()

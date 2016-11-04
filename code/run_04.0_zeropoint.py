@@ -17,7 +17,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=5,type=float)
+    parser.add_argument('-s','--sleep',default=0,type=float)
+    parser.add_argument('-n','--njobs',default=15,type=int)
     parser.add_argument('-q','--queue',default='condor')
     args = parser.parse_args()
 
@@ -42,20 +43,29 @@ if __name__ == "__main__":
 
             logbase = ('zp_'+os.path.basename(infile)).replace('.fits','.log')     
             logfile = os.path.join(logdir,logbase)
+
+            if not blfile:
+                blacklist = ''
+            elif isinstance(blfile,basestring):
+                blacklist = '-b %s'%blfile
+            elif isinstance(blfile,list):
+                blacklist = '-b '+' -b '.join(blfile)
+            
             params = dict(infile=infile,zpfile=zpfile,
-                          blacklist = '-b %s'%blfile if blfile else '',
+                          blacklist = blacklist,
                           extinction = '-e %s'%ebv if ebv else '',
                           force = '-f' if args.force else '')
             
             cmd = 'zeropoint.py %(force)s %(infile)s %(zpfile)s %(blacklist)s'%params
-            if ebv:
+            if False: #if ebv:
                 cmd += "; extinction.py %(force)s %(infile)s %(extinction)s"%params
 
             if args.queue == 'local':
                 print cmd
                 submit = cmd
             else:
-                submit = 'csub -o %s "%s"'%(logfile,cmd)
+                #submit = 'csub -o %s "%s"'%(logfile,cmd)
+                submit = 'csub -o %s -n %s "%s"'%(logfile,args.njobs,cmd)
             subprocess.call(submit,shell=True)
             time.sleep(args.sleep)
         if args.queue != 'local': time.sleep(5)

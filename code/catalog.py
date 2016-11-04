@@ -21,7 +21,8 @@ import ugali.utils.projector
 
 # Input columns
 BAND = 'BAND'
-IDX = [OBJECT_ID,BAND] + ['FILENAME','REQNUM','ATTNUM','OBJECT_NUMBER','TAG']
+#IDX = [OBJECT_ID,BAND] + ['FILENAME','REQNUM','ATTNUM','OBJECT_NUMBER','TAG']
+IDX = [OBJECT_ID,BAND] + ['FILENAME','PFW_ATTEMPT_ID','OBJECT_NUMBER','TAG']
 COORDS = ['RA','DEC']
 HEALPIX = ['HPX%d'%nside for nside in NSIDES]
 MAGPSF = ['MAG_PSF','MAGERR_PSF']
@@ -34,10 +35,11 @@ FLAGS = ['FLAGS']
 NEPOCHS = ['NEPOCHS']
 TEFF = ['T_EFF']
 EXPNUM = ['EXPNUM','CCDNUM']
-EXTINCTION = ['EXTINCTION']
-#EXTINCTION = []
+#EXTINCTION = ['EXTINCTION']
+EXTINCTION = []
+IMAGE = ['A_IMAGE','B_IMAGE','THETA_IMAGE']
 
-BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + EXTINCTION
+BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + IMAGE + EXTINCTION
 INPUT_COLS = IDX + [BAND] + COORDS + BEST
 
 # Output columns
@@ -72,6 +74,7 @@ OUTPUT_COLS = odict(
     + [(f,('i2',99)) for f in bfields(WAVGFLAGS,BANDS)]
     + [(f,('i4',-1)) for f in bfields(EXPNUM,BANDS)]
     + [(f,('f4',-1)) for f in bfields(TEFF,BANDS)]
+    + [(f,('f4',-1)) for f in bfields(IMAGE,BANDS)]
     + [(f,('f4',-1)) for f in bfields(EXTINCTION,BANDS)]
     )
 

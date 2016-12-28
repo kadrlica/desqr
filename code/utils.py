@@ -8,7 +8,9 @@ import numpy as np
 import fitsio
 import healpy
 
-from ugali.utils.logger import logger
+#from ugali.utils.logger import logger
+import logging as logger
+import warnings
 
 # Tools for working with the shell
 def pwd():
@@ -218,7 +220,7 @@ def load(args):
     logger.debug("Loading %s..."%infile)
     return fitsio.read(infile,columns=columns)
 
-def load_infiles(infiles,columns=None,multiproc=False):
+def load_infiles2(infiles,columns=None,multiproc=False):
     if isinstance(infiles,basestring):
         infiles = [infiles]
 
@@ -228,7 +230,8 @@ def load_infiles(infiles,columns=None,multiproc=False):
 
     if multiproc:
         from multiprocessing import Pool
-        p = Pool(maxtasksperchild=1)
+        processes = multiproc if multiproc > 0 else None
+        p = Pool(processes,maxtasksperchild=1)
         out = p.map(load,args)
     else:
         out = [load(arg) for arg in args]
@@ -244,6 +247,32 @@ def load_infiles(infiles,columns=None,multiproc=False):
             data = np.append(data,d)
 
     return data
+
+def load_infiles(infiles,columns=None,multiproc=False):
+    if isinstance(infiles,basestring):
+        infiles = [infiles]
+
+    logger.debug("Loading %s files..."%len(infiles))
+
+    args = zip(infiles,len(infiles)*[columns])
+
+    if multiproc:
+        from multiprocessing import Pool
+        processes = multiproc if multiproc > 0 else None
+        p = Pool(processes,maxtasksperchild=1)
+        out = p.map(load,args)
+    else:
+        out = [load(arg) for arg in args]
+
+    dtype = out[0].dtype
+    for i,d in enumerate(out):
+        if d.dtype != dtype: 
+            # ADW: Not really safe...
+            logger.warn("Casting input data to same type.")
+            out[i] = d.astype(dtype)
+            
+    return np.concatenate(out)
+
 
 def uid(expnum,ccdnum):
     return expnum + ccdnum/100.

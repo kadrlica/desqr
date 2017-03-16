@@ -15,7 +15,7 @@ import numpy as np
 from const import BANDS,OBJECT_ID,UNIQUE_ID,BADMAG
 from utils import bfields
 
-SECTIONS = ['download','pixelize','zeropoint','match','catalog']
+SECTIONS = ['download','pixelize','zeropoint','match','catalog','nan']
 OK  = color('OK','green')
 FAIL = color('FAIL','red')
 BAD = color('BAD','red')
@@ -148,7 +148,7 @@ def check_columns(args,columns=None,select=None,msg=None):
         #msg = msg%dict(columns=columns,filename=f)
         if msg: 
             print msg%dict(columns=columns,filename=f)
-        if not isinstance(sel,bool):
+        if not isinstance(sel,(bool,type(np.bool))):
             msg = "Bad %(columns)s value in %(filename)s"
             print msg%dict(columns=columns,filename=f)
             print 4*' '+bad_values_str(data[sel])
@@ -204,6 +204,20 @@ def check_match(args):
     msg = color("Poor match in %(filename)s",'yellow')
     kwargs = dict(columns=bfields('NEPOCHS',band),select=select,msg=msg)
     return check_columns(args,**kwargs)
+
+def check_nan(args):
+    kwargs = dict(select = lambda x: bool(np.any(np.isnan(x.view('>f4')))) )
+
+    kwargs.update(columns=bfields(['WAVG_MAGRMS_AUTO','WAVG_MAGRMS_PSF'],BANDS),
+                  msg="Bad MAGRMS value in %(filename)s")
+    ret = check_columns(args,**kwargs)
+
+    kwargs.update(columns=bfields(['WAVG_SPREADRMS_MODEL'],BANDS),
+                  msg="Bad SPREADRMS value in %(filename)s")
+    ret |= check_columns(args,**kwargs)
+
+    return ret
+
 
 if __name__ == "__main__":
     import argparse
@@ -353,6 +367,20 @@ if __name__ == "__main__":
                 print 2*' '+"Match Fraction:"
                 out = run_pool(check_match,args)
                 print FAIL if np.any(out) else OK
+
+    if 'nan' in sections:
+        catdir = config['catdir']
+        if not dir_exists(catdir): pass
+        keydir = config['keydir']
+        if not dir_exists(keydir): pass
+        
+        files = sorted(glob.glob(catdir+'/*.fits'))
+        nfiles = len(files)
+        args = [(f,nfiles,band) for f in files]
+
+        print 2*' '+"NaN:"
+        out = run_pool(check_nan,args)
+        print FAIL if np.any(out) else OK
 
     print "\nDone."
                 

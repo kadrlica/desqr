@@ -21,6 +21,29 @@ def ang2pix(nside, lon, lat, nest=False):
     phi = np.radians(lon)
     return healpy.ang2pix(nside, theta, phi, nest)
 
+def readfile(filename):
+    """
+    Abstract file reading to deal with raw catalog files.
+    """
+    f = fitsio.FITS(filename,'r')
+    idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
+    nrows = f[idx].get_nrows()
+    logger.info("%i objects found"%nrows)
+    if not nrows: 
+        f.close()
+        return
+
+    data = f[idx].read()
+    f.close()
+
+    names = list(data.dtype.names)
+    if ('RA' not in names) and ('DEC' not in names):
+        names[names.index('ALPHAWIN_J2000')] = 'RA'
+        names[names.index('DELTAWIN_J2000')] = 'DEC'
+        data.dtype.names = names
+
+    return data
+
 def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,force=False):
     """
     Break catalog up into a set of healpix files.
@@ -36,12 +59,15 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,force=False):
 
     for ii,infile in enumerate(infiles):
         logger.info('(%i/%i) %s'%(ii+1, len(infiles), infile))
-        f = fitsio.FITS(infile,'r')
-        nrows = f[1].get_nrows()
-        logger.info("%i objects found"%nrows)
-        if not nrows: continue
-        data = f[1].read()
-        f.close()
+        data = readfile(infile)
+        if data is None: continue
+
+        #f = fitsio.FITS(infile,'r')
+        #nrows = f[1].get_nrows()
+        #logger.info("%i objects found"%nrows)
+        #if not nrows: continue
+        #data = f[1].read()
+        #f.close()
 
         catalog_pix = ang2pix(nside,data['RA'],data['DEC'])
         #### Add object pixel (hack to get correct byte order)

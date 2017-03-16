@@ -270,7 +270,8 @@ def load_infiles(infiles,columns=None,multiproc=False):
             # ADW: Not really safe...
             logger.warn("Casting input data to same type.")
             out[i] = d.astype(dtype)
-            
+
+    logger.debug('Concatenating arrays...')
     return np.concatenate(out)
 
 
@@ -299,6 +300,12 @@ def ang2pix(nside, lon, lat, nest=False):
     theta = np.radians(90. - lat)
     phi = np.radians(lon)
     return healpy.ang2pix(nside, theta, phi, nest)
+
+def rename_column(data, old, new):
+    """
+    Rename a column from old to new
+    """
+    names = data.dtype.names
 
 
 def get_vizier_catalog(ra,dec,radius=None,**kwargs):

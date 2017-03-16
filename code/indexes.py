@@ -5,7 +5,8 @@ import time
 import sys
 import logging
 
-logging.basicConfig(stream=sys.stdout,format='%(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s',
+                    datefmt='%Y-%m-%d %I:%M:%S %p', stream=sys.stdout)
 
 import easyaccess as ea
 import yaml
@@ -16,9 +17,9 @@ from const import BANDS, OBJECT_ID, UNIQUE_ID
 from download import create_bitmap_index
 
 QUERY = dict(
-    BTX='create index {index} on {table}({column});',
-    BMX='create bitmap index {index} on {table}({column});',
-    PK='alter table {table} add constraint {index} primary key ({column});',
+    BTX='create index {index} on {table}({column})',
+    BMX='create bitmap index {index} on {table}({column})',
+    PK='alter table {table} add constraint {index} primary key ({column})',
 )
 
 INDEX = dict(
@@ -26,6 +27,9 @@ INDEX = dict(
     BMX='{idxname}_{column}_BMX',
     PK ='{idxname}_PK',
 )
+
+import logging
+
 
 def drop_index(cursor, index):
     query = "DROP INDEX %s"%(index)
@@ -39,6 +43,7 @@ if __name__ == "__main__":
     description = "Add comments to table"
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config')
+    parser.add_argument('-t','--table',action='append')
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-d','--dryrun',action='store_true')
@@ -53,10 +58,11 @@ if __name__ == "__main__":
 
     con = ea.connect(section=section,quiet=True)
     con.drop_index = drop_index
+    cursor = con.cursor()
 
     tables = data.keys()
     for table in tables:
-        table = 'Y3Q2_ZEROPOINTS_V0'
+        if args.table and (table not in args.table): continue
 
         logging.debug(table)
         idxname = data[table].get('idxname',table.split('_')[0])
@@ -66,7 +72,8 @@ if __name__ == "__main__":
         for key,val in data[table]['columns'].items():
             if not val.get('index',None): continue
             for b in BANDS:
-                column = key.format(b=b.upper())
+                params.update(b=b.upper())
+                column = key.format(**params)
                 params.update(column=column)
 
                 idx = val['index']
@@ -81,8 +88,11 @@ if __name__ == "__main__":
 
                 if not args.dryrun:
                     if args.force and index is not None:
-                        drop_index(con.cursor(),index)
-                    con.onecmd(query)
+                        drop_index(cursor,index)
+                    try:
+                        cursor.execute(query)
+                    except Exception as e:
+                        print(e)
 
                 if column == key: break
 
@@ -95,5 +105,8 @@ if __name__ == "__main__":
             if not args.dryrun:
                 if args.force:
                     drop_index(con.cursor(),index)
-                con.onecmd(query)
+                try: 
+                    cursor.execute(query)
+                except Exception as e:
+                    print(e)
         break

@@ -127,6 +127,9 @@ def wavg(values,weights,labels=None,index=None,inverse=None,counts=None):
     wavg_rms  = np.sqrt(wavg_rms)
     np.seterr(**err)
 
+    ## Convert NaN to BADMAG
+    #wavg_rms[np.isnan(wavg_rms)] = BADMAG
+
     return wavg, np.where(counts > 1,wavg_rms,wavg_err)
 
 
@@ -182,6 +185,9 @@ def coadd_mag(mag,magerr,labels,index=None,inverse=None,counts=None):
     # Magnitude errors in quadrature
     wavg_magerr = np.sqrt(nd.sum(magerr**2,labels=labels,index=index))/counts
 
+    # Bad RMS values (untested)
+    wavg_magrms[np.isnan(wavg_magrms)] = BADMAG
+
     return wavg_mag,wavg_magerr,wavg_magrms
 
 @verbose
@@ -195,6 +201,10 @@ def coadd_spread(spread,spreaderr,labels,index=None,inverse=None,counts=None):
 
     # Add spreaderr in quadrature
     wavg_spreaderr = np.sqrt(nd.sum(spreaderr**2,labels=labels,index=index))/counts
+
+    # Bad RMS values (untested)
+    wavg_spreadrms[np.isnan(wavg_spreadrms)] = BADMAG
+
     ret = [wavg_spread,wavg_spreaderr,wavg_spreadrms]
     
     ### # extrema is only a little faster than positions individually

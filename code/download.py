@@ -139,6 +139,7 @@ def old_y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT
     #select o.filename, c.ccdnum from prod.se_object o, prod.catalog c where c.filename=o.filename and rownum < 10;
     # William would like A_IMAGE,B_IMAGE, and THETA_IMAGE
     # Moved to using qa_summary for teff values
+    # IMAFLAGS_ISO: http://des-docdb.fnal.gov:8080/cgi-bin/ShowDocument?docid=8814
     kwargs=dict(expnum=expnum,reqnum=reqnum,attnum=attnum)
     kwargs['unitname'] = 'D%(expnum)08d'%kwargs
     kwargs['filename'] = "%(unitname)s_%%_r%(reqnum)dp%(attnum)02d_%%"%kwargs
@@ -146,8 +147,8 @@ def old_y3a1_object_query(expnum=None,reqnum=None,attnum=None,tag='Y3A1_FINALCUT
     query = """-- Single-epoch catalog download
 -- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
 SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
-CAST(t.UNITNAME AS VARCHAR(9)) as UNITNAME, t.REQNUM, t.ATTNUM, 
-CAST(t.tag AS VARCHAR(13)) as TAG,
+CAST(t.UNITNAME AS VARCHAR(9)) as UNITNAME, t.REQNUM, t.CAST, 
+ATTNUM(t.tag AS VARCHAR(13)) as TAG,
 qa.EXPNUM, CAST(SUBSTR(o.FILENAME,14,2) AS INT) as CCDNUM,
 CAST(o.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, o.FWHM_WORLD, o.FLAGS, 
 o.OBJECT_NUMBER, 

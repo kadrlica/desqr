@@ -48,6 +48,6 @@ if __name__ == "__main__":
         time.sleep(1)
 
     grant = 'grant select on %s to DES_READER'%args.table
-    logging.info(msg)
+    logging.info(grant)
     cur.execute(grant)
     

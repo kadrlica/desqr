@@ -17,31 +17,39 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=1,type=float)
     parser.add_argument('-q','--queue',default='condor')
-    opts = parser.parse_args()
+    parser.add_argument('-v','--verbose',action='store_true')
+    args = parser.parse_args()
 
-    force = '-f' if opts.force else ''
-    config = yaml.load(open(opts.config))
+    force = '-f' if args.force else ''
+    config = yaml.load(open(args.config))
     catdir = config['catdir']
+
     skmdir = mkdir(config['skmdir'])
-    columns = config['skim']
+    columns = config['skimcol'] if 'skimcol' in config else config['skim']
+    select = config.get('skimsel')
+
     logdir = mkdir(os.path.join(skmdir,'log'))
-    # Upload the catalog
+
     infiles = sorted(glob.glob(catdir+'/*.fits'))
 
     for infile in infiles:
         basename = os.path.basename(infile)
         outfile = os.path.join(skmdir,basename)
         logfile = os.path.join(logdir,basename.replace('.fits','.log'))
-        if os.path.exists(outfile) and not opts.force:
+        if os.path.exists(outfile) and not args.force:
             found(outfile)
             continue
 
         params = (infile,outfile,force,' -c '.join(columns))
         cmd = "skim.py %s %s %s -c %s"%params
-        if opts.queue == 'local':
+        if args.queue == 'local':
+            if select: cmd += ' -s "%s"'%select
             submit = cmd
         else:
+            if select: cmd += r' -s "\\\"%s\\\""'%select
             submit = "csub -o %s %s"%(logfile,cmd)
+        if args.verbose:
+            print submit
         subprocess.call(submit,shell=True)
-        time.sleep(opts.sleep)
-
+        time.sleep(args.sleep)
+        #break

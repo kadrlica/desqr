@@ -110,6 +110,15 @@ def draw_maglites(skymap,proj='car',**kwargs):
     im = draw_footprint(skymap,proj,**kwargs)
     return im
 
+def draw_bliss(skymap,proj='car',**kwargs):
+    """ 
+    Draw BLISS footprint:
+       360 > RA > 120, -60 < DEC < -10
+    """
+    kwargs.setdefault('extent',[360,120,-60,-10])
+    im = draw_footprint(skymap,proj,**kwargs)
+    return im
+
 def draw_desgw(skymap,proj='car',**kwargs):
     kwargs.setdefault('extent',[180,30,-80,-50])
     return draw_footprint(skymap,proj,**kwargs)

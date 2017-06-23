@@ -2,6 +2,7 @@
 import os
 import fitsio
 import numpy as np
+import pandas as pd
 from collections import OrderedDict as odict
 
 import healpy
@@ -14,7 +15,7 @@ from const import ZEROSTR,OBJECT_ID
 from ugali.utils.logger import logger
 import ugali.utils.projector as proj
 
-MATCHCOLS = ['RA','DEC']
+MATCHCOLS = ['RA','DEC','EXPNUM']
 
 ### def projector2(lon,lat):
 ###     from ugali.utils.projector import SphericalRotator
@@ -200,6 +201,19 @@ def match_exposures(data,radius=1.0):
 
     return match_id 
 
+def deblend(ra,dec,match_id,expnum):
+    df=pd.DataFrame(dict(ra=ra,dec=dec,match_id=match_id,expnum=expnum))
+    cts = df[['match_id','expnum','ra']].groupby(['match_id','expnum'],as_index=False).count()
+    cts.columns = ['match_id','expnum','counts']
+    duplicate_objects = cts.match_id[cts['counts'] > 1]
+    
+    # Subselection of blended objects
+    blends = df[np.in1d(df['match_id'].values,duplicate_objects.values)]
+    blends = blends.merge(cts)
+    
+    blends[blends.counts > 1].match_id
+    pass
+
 if __name__ == "__main__":
     import argparse
     description = "python script"
@@ -230,6 +244,8 @@ if __name__ == "__main__":
 
     zero_id = int(ZEROSTR%(pix,0))
 
+    data = data.byteswap().newbyteorder()
+
     if len(data) == 1:
         match_id = np.array([0])
     else:
@@ -237,6 +253,8 @@ if __name__ == "__main__":
     #match_id = match_multi_stage(data['RA'],data['DEC'],radius=opts.radius)
     match_id += zero_id
     column = np.rec.fromarrays([match_id],dtype=[(opts.objid,int)])
+
+    objid = deblend(data['RA'],data['DEC'],column,data['EXPNUM'])
 
     ### uid,inv = np.unique(match_id,return_inverse=True)
     ### median_ra,median_dec = centroid(data['RA'],data['DEC'],stat='median',labels=match_id,index=uid)
@@ -246,4 +264,5 @@ if __name__ == "__main__":
      
     # Write out match_id
     for f,idx in fileidx.items():
-        utils.insert_columns(f,column[idx],force=opts.force)
+        #utils.insert_columns(f,column[idx],force=opts.force)
+        pass

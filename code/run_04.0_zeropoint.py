@@ -11,6 +11,7 @@ import glob
 import fitsio
 
 from ugali.utils.shell import mkdir
+import download
 
 if __name__ == "__main__":
     import argparse
@@ -26,7 +27,17 @@ if __name__ == "__main__":
     hpxdir = config['hpxdir']
     zpfile = config['zpfile']
     blfile = config['blfile']
+    section= config['db']
+    tags   = config['tags']
     ebv    = config.get('ebv',None)
+    
+    if os.path.exists(zpfile) and not args.force:
+        print "Found %s; skipping download..."%zpfile
+    else:
+        query = download.zeropoint_query(tags)
+        print query
+        sqlfile = os.path.splitext(zpfile)[0]+'.sql'
+        download.download(zpfile,query,sqlfile=sqlfile,section=section,force=args.force)
 
     for band in config['bands']:
         indir = os.path.join(hpxdir,band)

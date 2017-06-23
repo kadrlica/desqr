@@ -452,6 +452,17 @@ from erykoff.Y3A1_FGCM_Y1Y2Y3_V1_0@dessci z
 order by expnum, ccdnum;"""
     return query
 
+def y3a1_fgcm_zeropoint_query():
+    query = """-- fGCM zeropoints                                              select z.EXPNUM, z.CCDNUM,
+CAST(z.BAND AS VARCHAR(1)) AS BAND,
+z.RA_CENT as RA, z.DEC_CENT as DEC,
+z.FGCM_ZPT as MAG_ZERO, z.FGCM_ZPTERR as SIGMA_MAG_ZERO,
+z.FGCM_FLAG, (CASE WHEN z.FGCM_FLAG < 16 THEN 0 ELSE 1 END) as ZP_FLAG
+from erykoff.Y3A1_FGCM_ALL_V2_5@dessci z
+order by expnum, ccdnum;
+"""
+    return query
+
 
 def gcm_query():
     query = """-- Select Y1A1 GCM zeropoints
@@ -486,13 +497,23 @@ order by EXPNUM, CCDNUM;
 """
     return query
 
+def bliss_zeropoint_query():
+    # postgres
+    query = """-- Zeropoint query for bliss on the postgres database
+select EXPNUM, CCDNUM, BAND, MAG_ZERO, SIGMA_MAG_ZERO, FLAG as ZP_FLAG
+from zeropoints order by EXPNUM, CCDNUM;
+"""
+    return query
+
 def zeropoint_query(tags=None):
     tags = map(str.upper,tags)
     if 'Y1A1_FINALCUT' in tags or 'Y2N_FIRSTCUT' in tags:
         return y2q_zeropoint_query()       
     if 'MAGLITES_FIRSTCUT' in tags:
         return maglites_zeropoint_query()
-    
+    if 'BLISS' in tags:
+        return bliss_zeropoint_query()
+
 def exposure_query(tags=None,program='survey'):
     tags = map(str.upper,tags)
     queries = []
@@ -519,7 +540,7 @@ def exposure_query(tags=None,program='survey'):
     query += 'ORDER BY expnum;'
     return query
 
-def download(outfile,query,sqlfile=None,section='desoper',force=False):
+def or_download(outfile,query,sqlfile=None,section='desoper',force=False):
     if os.path.exists(outfile) and not force:
         msg = "Found %s; skipping..."%outfile
         raise Exception(msg)
@@ -541,6 +562,35 @@ def download(outfile,query,sqlfile=None,section='desoper',force=False):
     print cmd
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
+
+def pg_download(outfile,query,sqlfile=None,section='BLISS',force=False):
+    if os.path.exists(outfile) and not force:
+        msg = "Found %s; skipping..."%outfile
+        raise Exception(msg)
+
+    if sqlfile:
+        sql = open(sqlfile,'w')
+        remove = False
+    else:
+        sql = tempfile.NamedTemporaryFile(delete=False)
+        sqlfile = sql.name
+        remove = True
+        
+    sql.write(r"COPY("+'\n')
+    sql.write(query.rstrip().rstrip(';'))
+    sql.write("\n) to STDOUT WITH CSV HEADER DELIMITER ','; \n")
+    sql.close()
+    
+    cmd = 'psql -h des51.fnal.gov %s -f %s > %s'%(section.upper(),sqlfile,outfile)
+    print cmd
+    subprocess.call(cmd,shell=True)
+    if remove: os.remove(sqlfile)
+
+def download(outfile,query,sqlfile=None,section='desoper',force=False):
+    if section in ['desoper','dessci']:
+        return or_download(outfile,query,sqlfile,section,force)
+    elif section in ['bliss']:
+        return pg_download(outfile,query,sqlfile,section,force)
 
 if __name__ == "__main__":
     import argparse

@@ -36,7 +36,7 @@ def read_blacklist(blacklist):
     if isinstance(blacklist,basestring):
         ext = os.path.splitext(blacklist)[-1]
         if ext == '.csv':
-            bl = pd.read_csv(blacklist).to_records()
+            bl = pd.read_csv(blacklist).to_records(index=False)
         elif ext == '.fits':
             bl = fitsio.read(blacklist)
         else:
@@ -64,18 +64,26 @@ def read_zeropoint(zeropoint,blacklist=None):
     ext = os.path.splitext(zeropoint)[-1]
     if ext == '.csv':
         #zp = np.recfromcsv(zeropoint)
-        zp = pd.read_csv(zeropoint).to_records()
+        zp = pd.read_csv(zeropoint).to_records(index=False)
+        zp.dtype.names = map(str.upper,zp.dtype.names)
     elif ext == '.fits':
         zp = fitsio.read(zeropoint,ext=1,columns=ZPCOLS)
     else:
         msg = "Unrecognized zeropoint extension: %s"%ext
         raise Exception(msg)
+
+    # If necessary, change the sign of MAG_ZERO
+    if (zp['MAG_ZERO'] < 0).sum()/float(len(zp)) > 0.90:
+        msg = "Switching sign of MAG_ZERO."
+        logger.info(msg)
+        zp['MAG_ZERO'] *= -1
         
     # reject CCDs with MAG_ZERO < 0
     sel_zero = (zp['MAG_ZERO'] >= 0)
     if (~sel_zero).sum():
         msg = "Found %i CCDs with negative zeropoints."%(~sel_zero).sum()
         logger.warning(msg)
+        
     # reject CCDs with QSLR_FLAGS > 0
 
     sel_flags = (zp['ZP_FLAG'] == 0)

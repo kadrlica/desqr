@@ -27,7 +27,7 @@ if __name__ == "__main__":
     tags = config.get('tags')
     
     if os.path.exists(explist) and not args.force:
-        print "Found %s; skipping ..."%explist
+        print "Found %s; skipping download..."%explist
     else:
         query = download.exposure_query(tags,program='survey')
         print query

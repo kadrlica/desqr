@@ -63,6 +63,17 @@ DESDM = odict([
         ('y', 1.277421),
         ])
 
+# R_lambda values for Y3A1 from:
+# https://cdcvs.fnal.gov/redmine/projects/des-y3/wiki
+Y3A1 = odict([
+        ('g',3.185),
+        ('r',2.140),
+        ('i',1.571),
+        ('z',1.198),
+        ('Y',1.052),
+        ('y',1.052),
+        ])
+
 OUTCOLS  = ['EXTINCTION','EBV']
 FITSEXT = ('.fits','.fit','.fz')
 CSVEXT = ('.csv')

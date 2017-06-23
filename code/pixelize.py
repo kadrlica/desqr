@@ -25,7 +25,7 @@ def readfile(filename):
     """
     Abstract file reading to deal with raw catalog files.
     """
-    f = fitsio.FITS(filename,'r')
+    f = fitsio.FITS(filename,'r',upper=True)
     idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
     nrows = f[idx].get_nrows()
     logger.info("%i objects found"%nrows)
@@ -36,15 +36,25 @@ def readfile(filename):
     data = f[idx].read()
     f.close()
 
+    ALT_RADEC_COLUMNS = [
+        ['ALPHAWIN_J2000','DELTAWIN_J2000'],
+        ]
+
     names = list(data.dtype.names)
     if ('RA' not in names) and ('DEC' not in names):
-        names[names.index('ALPHAWIN_J2000')] = 'RA'
-        names[names.index('DELTAWIN_J2000')] = 'DEC'
-        data.dtype.names = names
+        for ra,dec in ALT_RADEC_COLUMNS:
+            if (ra in names) and (dec in names):
+                names[names.index(ra)] = 'RA'
+                names[names.index(dec)] = 'DEC'
+                data.dtype.names = names
+                break
+        else:
+            msg = "No RA,DEC columns found."
+            raise ValueError(msg)
 
     return data
 
-def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,force=False):
+def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=False):
     """
     Break catalog up into a set of healpix files.
     """
@@ -117,5 +127,9 @@ if __name__ == "__main__":
     opts = parser.parse_args()
 
     if opts.verbose: logger.setLevel(logger.DEBUG)
-    infiles = sorted(glob.glob(opts.indir+'/*.fits'))
+
+    for ext in ['.fits','.fits.gz']:
+        infiles = sorted(glob.glob(opts.indir+'/*'+ext))
+        if infiles: break
+
     pixelize(infiles,opts.outdir,opts.outbase,nside=opts.nside,force=opts.force)

@@ -82,17 +82,19 @@ if __name__ == "__main__":
     plotdir = mkdir('release/footprint')
 
     skymaps = [
-        ['any' ,sel_any ],
-        ['all' ,sel_all ],
-        ['g'   ,sel_g   ],
-        ['r'   ,sel_r   ],
-        ['i'   ,sel_i   ],
-        ['z'   ,sel_z   ],
-        ['Y'   ,sel_Y   ],
-        #['gr'  ,sel_gr  ],
+        ['any' ,sel_any  ],
+        ['all' ,sel_grizY],
+        ['all' ,sel_griz ],
+        ['g'   ,sel_g    ],
+        ['r'   ,sel_r    ],
+        ['i'   ,sel_i    ],
+        ['z'   ,sel_z    ],
+        #['Y'   ,sel_Y   ],
+        ['gr'  ,sel_gr  ],
         #['iz'  ,sel_iz  ],
         ]
 
+    #import pdb; pdb.set_trace()
     for i,(n,s) in enumerate(skymaps):
         skymaps[i] += [empty(nside)]
 
@@ -107,19 +109,14 @@ if __name__ == "__main__":
             pix,cts = np.unique(pixels[s],return_counts=True)
             counts[pix] += cts
 
-    #p = Pool(maxtasksperchild=1)
-    #out = p.map(footprint,infiles)
-    #for name,sel,counts in skymaps:
-    #    out
-
-    #data = load_infiles(infiles,columns=COLUMNS)
-    #pixels = ang2pix(nside,data['RA'],data['DEC'])
-
     outstr = '|_. Band |_. Footprint|_. Area (deg^2) |\n'
     template = '|_. %(band)s |{{thumbnail(%(map)s, size=300)}}|_. %(area).2f |\n'
 
     out = dict()
     for name,sel,counts in skymaps:
+        if counts.sum() == 0:
+            print "No counts for selection: %s"%name
+            continue
         out['band'] = name
         density = counts/pixarea
         skymap = np.ma.MaskedArray(np.log10(density),counts == 0,fill_value=np.nan)
@@ -130,6 +127,8 @@ if __name__ == "__main__":
             im = plotting.draw_des(skymap,cmap='viridis')
         elif args.survey == 'maglites':
             im = plotting.draw_maglites(skymap,cmap='viridis')
+        elif args.survey == 'bliss':
+            im = plotting.draw_bliss(skymap,cmap='viridis')
         else:
             im = plotting.draw_footprint(skymap,cmap='viridis')
         plt.colorbar(im,label=r'$\log_{10}({\rm Density}\ [\deg^{-2}])$')
@@ -142,8 +141,6 @@ if __name__ == "__main__":
         print "Writing %s..."%outfile
         healpy.write_map(outfile,counts,dtype=int)
         outstr += template%out
-     
-
     print outstr
 
     kwargs = dict(bins=np.linspace(1,100,100),histtype='step',lw=1.5)
@@ -156,3 +153,4 @@ if __name__ == "__main__":
     plt.ylabel('Number of Pixels')
     outfile = join(plotdir,'y2q1_footprint_hist_n%i.png'%nside)
     plt.savefig(outfile,bbox_inches='tight')
+    plt.ion()

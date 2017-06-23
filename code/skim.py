@@ -8,10 +8,22 @@ if __name__ == "__main__":
     parser.add_argument('infile')
     parser.add_argument('outfile')
     parser.add_argument('-c','--columns',action='append')
+    parser.add_argument('-s','--select',default=None)
     parser.add_argument('-f','--force',action='store_true')
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
-    print "Reading %s..."%opts.infile
-    data,header=fitsio.read(opts.infile,header=True,columns=opts.columns)
-    print "Writing %s..."%opts.outfile
-    utils.write(opts.outfile,data,header=header,force=opts.force)
+    print("Reading %s..."%args.infile)
+    data,header=fitsio.read(args.infile,header=True,columns=args.columns)
+
+    if args.select:
+        print "Applying selection: %s"%args.select
+        if 'data' not in args.select:
+            msg = "Invalid select statement: %s"%args.select
+            raise Exception(msg)
+        data = data[eval(args.select)]
+
+    if len(data) == 0:
+        print("No objects pass selection.")
+    else:
+        print("Writing %s..."%args.outfile)
+        utils.write(args.outfile,data,header=header,force=args.force)

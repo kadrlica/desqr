@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument('config')
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=2,type=float)
-    parser.add_argument('-n','--njobs',default=None,type=int)
+    parser.add_argument('-n','--njobs',default=24,type=int)
     parser.add_argument('-q','--queue',default='condor')
     parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()

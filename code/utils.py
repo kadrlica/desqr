@@ -94,11 +94,13 @@ def mean_value(value,labels):
     return mean_value
 
 # Dealing with FITS files
-def write(filename,data,header=None,force=False):
+def write_fits(filename,data,header=None,force=False):
     if os.path.exists(filename) and not force:
         found(filename)
         return
     fitsio.write(filename,data,header=header,clobber=force)
+
+write = write_fits
 
 def insert_columns(filename,data,ext=1,force=False):
     #logger.info(filename)
@@ -306,6 +308,59 @@ def rename_column(data, old, new):
     Rename a column from old to new
     """
     names = data.dtype.names
+
+
+def check_formula(formula):
+    """ Check that a formula is valid. """
+    if not (('data[' in formula) and (']' in formula)):
+        msg = 'Invalid formula:\n %s'%formula
+        raise ValueError(msg)
+
+def parse_formula(formula):
+    """ Return the columns used in a formula. """
+    check_formula(formula)
+
+    columns = []
+    for x in formula.split('data[')[1:]:
+        columns += x.split(']')[0].replace('"','').replace("'",'')
+
+    return columns
+
+def skim_data(infile,outfile,columns,select=None,force=False):
+    """ Skim data from a FITS file. 
+
+    ADW: Could this be replaced by a ftool?
+    """
+    logger.info("Running %s..."%infile)
+    data,header=fitsio.read(infile,header=True,columns=columns)
+
+    if select:
+        check_formula(select)
+        logger.debug("  Applying selection: %s"%select)
+        data = data[eval(select)]
+
+    if len(data) == 0:
+        logger.debug("  No objects pass selection.")
+    else:
+        logger.debug("  Writing %s..."%outfile)
+        write_fits(outfile,data,header=header,force=force)
+
+def add_column(filename,column,formula,force=False):
+    """ Add a column to a FITS file.
+
+    ADW: Could this be replaced by a ftool?
+    """
+    columns = parse_formula(formula)
+    logger.info("Running file: %s"%filename)
+    logger.debug("  Reading columns: %s"%columns)
+    data = fitsio.read(filename,columns=columns)
+
+    logger.debug('  Evaluating formula: %s'%formula)
+    col = eval(formula)
+
+    col = np.asarray(col,dtype=[(column,col.dtype)])
+    insert_columns(filename,col,force=force)
+    return True
 
 
 def get_vizier_catalog(ra,dec,radius=None,**kwargs):

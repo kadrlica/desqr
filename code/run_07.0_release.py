@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     if 'footprint' in sections:
         exe = os.path.join(path,'footprint.py')
-        cmd = 'python %s --survey %s'%(exe,config.get('survey','des'))
+        cmd = 'python %s -n 1024 --survey %s'%(exe,config.get('survey','des'))
         if args.verbose: cmd += ' -v'
             
         if args.queue == 'local':

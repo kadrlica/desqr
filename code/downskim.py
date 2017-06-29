@@ -19,8 +19,8 @@ from const import BANDS, TAGS
 
 #from archive.dexp import ObjectsTable
 
-#bliss_temp = '/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
-bliss_des50 = '/export/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
+#bliss_temp = '/export/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
+bliss_des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 bliss_des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 
 outtemp = '%(unitname)s_%(band)s.fits'
@@ -35,7 +35,9 @@ def bliss_selection(data):
     sel &= data['FLUX_AUTO'] > 0
     sel &= data['FLAGS'] < 4
     sel &= (data['IMAFLAGS_ISO'] & 2047) == 0 
+    olderr = np.seterr(invalid='ignore',divide='ignore')
     sel &= 1.0857362*(data['FLUXERR_PSF']/data['FLUX_PSF']) < 0.5
+    np.seterr(**olderr)
     return sel
     
 def create_output(data,exp):
@@ -106,7 +108,9 @@ def downskim(outfile,select,exp,force):
     if not filenames:
         filenames = glob.glob(bliss_des60.format(**params))
     if not filenames:
-        msg = "File not found for: ",params
+        msg = "File not found for: " + str(params)
+        msg += '\n'+bliss_des50.format(**params)
+        msg += '\n'+bliss_des60.format(**params)
         raise IOError(msg)
 
     data = []

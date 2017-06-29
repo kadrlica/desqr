@@ -82,13 +82,13 @@ if __name__ == "__main__":
     plotdir = mkdir('release/footprint')
 
     skymaps = [
-        ['any' ,sel_any  ],
-        ['all' ,sel_grizY],
-        ['all' ,sel_griz ],
-        ['g'   ,sel_g    ],
-        ['r'   ,sel_r    ],
-        ['i'   ,sel_i    ],
-        ['z'   ,sel_z    ],
+        #['any' ,sel_any  ],
+        #['all' ,sel_grizY],
+        #['all' ,sel_griz ],
+        #['g'   ,sel_g    ],
+        #['r'   ,sel_r    ],
+        #['i'   ,sel_i    ],
+        #['z'   ,sel_z    ],
         #['Y'   ,sel_Y   ],
         ['gr'  ,sel_gr  ],
         #['iz'  ,sel_iz  ],
@@ -137,7 +137,7 @@ if __name__ == "__main__":
         print "Writing %s..."%outfile
         plt.savefig(outfile,bbox_inches='tight')
         out['map'] = os.path.basename(outfile)
-        outfile = join(plotdir,'footprint_%s_n%i_equ.fits'%(name,nside))
+        outfile = join(plotdir,'footprint_%s_n%i_equ.fits.gz'%(name,nside))
         print "Writing %s..."%outfile
         healpy.write_map(outfile,counts,dtype=int)
         outstr += template%out

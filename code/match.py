@@ -1,19 +1,23 @@
 #!/usr/bin/env python
-import os
+import os, sys
 import fitsio
 import numpy as np
 import pandas as pd
 from collections import OrderedDict as odict
+import logging
 
 import healpy
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
-
-import utils
-from const import ZEROSTR,OBJECT_ID
+from matplotlib.mlab import rec_append_fields
 
 from ugali.utils.logger import logger
 import ugali.utils.projector as proj
+
+import utils
+#from utils import logger
+from const import ZEROSTR,OBJECT_ID
+from split import split_qcat
 
 MATCHCOLS = ['RA','DEC','EXPNUM']
 
@@ -75,16 +79,16 @@ def match_ball_tree(lon,lat,radius=1.0):
         raise Exception(msg)
     if np.any(np.isnan(lon)):
         msg = "Invalid value found in lon: nan"
-        raise Exception(msg)
+        raise ValueError(msg)
 
     nobjs = len(lon)
-    logger.info("Found %i total objects with %s arcsec."%(nobjs,radius))
+    logger.info("Matching %i objects."%nobjs)
      
     # First iteration...
     coords = projector(lon,lat)
     dist = (radius/3600.)*(np.pi/180.)
     tree = cKDTree(coords)
-    logger.info("Querying ball tree...")
+    logger.info("Querying ball tree with radius %s arcsec..."%radius)
     idx = tree.query_ball_tree(tree,dist,eps=0.01)
     del tree, coords
      
@@ -113,6 +117,12 @@ def match_multi_stage(lon,lat,radius=1.0):
     2) Find the median location of the matched objects
     3) Use match_query to match between objects and medians
     4) Use match_ball_tree to self-match objects far from medians
+
+    Parameters:
+    -----------
+    lon    : longitude coordinate (deg)
+    lat    : latitude coordinate (deg)
+    radius : matching radius (arcmin)
     """
     if len(lon) != len(lat):
         msg = "Input lon and lat do not match"
@@ -153,6 +163,7 @@ def match_multi_stage(lon,lat,radius=1.0):
     return unique_id
 
 def match_htm(data,radius=1.0):
+    """ NOT IMPLEMENTED """
     logger.warning("'match_htm' not implemented")
     if True: return
 
@@ -162,6 +173,20 @@ def match_htm(data,radius=1.0):
     m = htm.match(data['RA'],data['DEC'],data['RA'],data['DEC'],**kwargs)
         
 def match_exposures(data,radius=1.0):
+    """ A matching algorithm that does not associate objects on the
+    same exposure with each other. This algorithm ended up being too
+    slow.
+
+    Parameters:
+    -----------
+    data   : input data containing 'RA' and 'DEC'
+    radius : matching radius (arcsec)
+
+    Returns:
+    --------
+    match_id : the object matching id
+    """
+
     expnums,counts = np.unique(data['EXPNUM'],return_counts=True)
     nobjs = len(data)
     nexp = len(expnums)
@@ -201,34 +226,70 @@ def match_exposures(data,radius=1.0):
 
     return match_id 
 
-def deblend(ra,dec,match_id,expnum):
-    df=pd.DataFrame(dict(ra=ra,dec=dec,match_id=match_id,expnum=expnum))
-    cts = df[['match_id','expnum','ra']].groupby(['match_id','expnum'],as_index=False).count()
-    cts.columns = ['match_id','expnum','counts']
-    duplicate_objects = cts.match_id[cts['counts'] > 1]
+def split(data,match_id):
+    """Split matched objects into pairs if consistently separated.
     
-    # Subselection of blended objects
-    blends = df[np.in1d(df['match_id'].values,duplicate_objects.values)]
-    blends = blends.merge(cts)
-    
-    blends[blends.counts > 1].match_id
-    pass
+    Parameters:
+    -----------
+    data     : the input record array
+    match_id : the object match ID
+
+    Returns:
+    --------
+    df       : a DataFrame containing 'QUICK_OBJECT_ID','SUB_ID', and 'SPLIT_FLAG'
+    """
+    logger.info("Splitting objects...")
+
+    # Columns used by the split
+    objid,subid,flag = ['QUICK_OBJECT_ID','SUB_ID','SPLIT_FLAG']
+    data = data.byteswap().newbyteorder()
+
+    # Create a DataFrame and run the splitting
+    df=pd.DataFrame(rec_append_fields(data,objid,match_id))
+    split = split_qcat(df)[[objid,subid,flag]]
+
+    if len(split) != len(df):
+        msg = "Length of split objects differs from input."
+        raise Exception(msg)
+
+    # Increment the match_id for split objects
+    subsel = (split[subid] > 0)
+    nsub = subsel.sum()
+    split[objid][subsel] = split[objid].max() + np.arange(1,nsub+1)
+
+    # Convert back to recarray 
+    dtype = [(objid,int),(subid,'i2'),(flag,'S15')]
+    rec = np.empty(len(split),dtype=dtype)
+    for n in rec.dtype.names:
+        rec[n] = split[n]
+
+    logger.info("Split %i objects."%(nsub))
+
+    return rec
 
 if __name__ == "__main__":
     import argparse
     description = "python script"
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('infiles',nargs='+')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-r','--radius',default=1.0,type=float)
-    parser.add_argument('-o','--objid',default=OBJECT_ID)
-    opts = parser.parse_args()
+    parser.add_argument('-r','--radius',default=1.0,type=float,
+                        help='matching radius')
+    parser.add_argument('-o','--objid',default=OBJECT_ID,
+                        help='name of output object identifier')
+    parser.add_argument('-f','--force',action='store_true',
+                        help='overwrite output columns if they exist')
+    parser.add_argument('-v','--verbose',action='store_true',
+                        help='output verbosity')
+    args = parser.parse_args()
+    
+    if args.verbose: logger.setLevel(logging.DEBUG)
 
-    logger.info("Matching files: %s"%opts.infiles)
-    radius = opts.radius
+    logger.info("Matching files: %s"%args.infiles)
+    radius = args.radius
     fileidx = odict()
 
-    for i,f in enumerate(opts.infiles):
+    data = []
+    for i,f in enumerate(args.infiles):
         d,hdr = fitsio.read(f,header=True,columns=MATCHCOLS)
         if i == 0:
             imin = 0
@@ -244,17 +305,27 @@ if __name__ == "__main__":
 
     zero_id = int(ZEROSTR%(pix,0))
 
-    data = data.byteswap().newbyteorder()
 
     if len(data) == 1:
         match_id = np.array([0])
     else:
-        match_id = match_ball_tree(data['RA'],data['DEC'],radius=opts.radius)
-    #match_id = match_multi_stage(data['RA'],data['DEC'],radius=opts.radius)
+        match_id = match_ball_tree(data['RA'],data['DEC'],radius=args.radius)
+    #match_id = match_multi_stage(data['RA'],data['DEC'],radius=args.radius)
     match_id += zero_id
-    column = np.rec.fromarrays([match_id],dtype=[(opts.objid,int)])
 
-    objid = deblend(data['RA'],data['DEC'],column,data['EXPNUM'])
+    # Run the split
+    out = split(data,match_id)
+    # Name the match_id column
+    out.dtype.names = [args.objid] + list(out.dtype.names)[1:]
+
+    ## Just use the match_id
+    #out = np.rec.array(match_id,dtype=[(args.objid,match_id.dtype)],copy=False)
+
+    # Write out columns
+    for f,idx in fileidx.items():
+        logger.info("Inserting column(s) into %s..."%f)
+        utils.insert_columns(f,out[idx],force=args.force)
+
 
     ### uid,inv = np.unique(match_id,return_inverse=True)
     ### median_ra,median_dec = centroid(data['RA'],data['DEC'],stat='median',labels=match_id,index=uid)
@@ -262,7 +333,3 @@ if __name__ == "__main__":
     ### import pylab as plt; plt.ion()
     ### plt.hist(sep*3600.,bins=100,log=True)
      
-    # Write out match_id
-    for f,idx in fileidx.items():
-        #utils.insert_columns(f,column[idx],force=opts.force)
-        pass

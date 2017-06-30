@@ -102,21 +102,33 @@ def write_fits(filename,data,header=None,force=False):
 
 write = write_fits
 
-def insert_columns(filename,data,ext=1,force=False):
+def insert_columns(filename,data,ext=1,force=False,check=True):
+    """
+    Insert columns from a recarray into a table in an existing FITS
+    file. Input data must have the same length as existing table. By
+    default, several corruption checks are run.
+    
+    Parameters:
+    -----------
+    filename : the FITS file to insert into
+    data     : the recarray to insert
+    ext      : the FITS extension (name or index)
+    force    : overwrite columns if they already exist
+
+    Returns:
+    --------
+    None
+    """
+
     #logger.info(filename)
     if not os.path.exists(filename):
         msg = "Requested file does not exist."
         raise IOError(msg)
 
     fits = fitsio.FITS(filename,'rw')
-    names = fits[ext].get_colnames()
-    overlap = np.in1d(data.dtype.names,names)
-
-    test = None
-    if np.any(~overlap):
-        idx = np.argmax(np.in1d(names,data.dtype.names))
-        test = names[idx]
-        orig = fits[ext].read(columns=[test])
+    oldnames = fits[ext].get_colnames()
+    newnames = data.dtype.names
+    overlap = np.in1d(oldnames,newnames)
 
     if np.any(overlap) and not force:
         logger.warning("Found overlapping columns; skipping...")
@@ -124,8 +136,16 @@ def insert_columns(filename,data,ext=1,force=False):
     if len(data) != fits[ext].get_nrows():
         logger.warning("Number of rows does not match; skipping...")
         return
-    for col in data.dtype.names:
-        if col not in names:
+
+    # Test that at least one other columns not corrupted during insert
+    test = None
+    if np.any(~overlap) and check:
+        idx = np.where(~overlap)[0][-1]
+        test = oldnames[idx]
+        orig = fits[ext].read(columns=[test])
+
+    for col in newnames:
+        if col not in oldnames:
             msg = "Inserting column: %s"%col
             logger.info(msg)
             fits[ext].insert_column(col,data[col])
@@ -136,12 +156,15 @@ def insert_columns(filename,data,ext=1,force=False):
 
     fits.close()
 
-    # It's already too late since the file has been written...
-    if test is not None:
+    # The file has been written, but might as well know...
+    if test and check:
         new = fitsio.read(filename,ext=ext,columns=[test])
-        if np.any(new != orig):
-            msg = "Input and output do not match!"
-            raise Exception(msg)
+        np.testing.assert_array_equal(new,orig,"Collateral damage: %s"%test)
+        
+        name = newnames[0]
+        new = fitsio.read(filename,ext=ext,columns=[name])
+        np.testing.assert_array_equal(new[name],data[name],
+                                      "Input/output mismatch: %s"%name)
 
 
 def insert_index(filename,data,ext=1,force=False):

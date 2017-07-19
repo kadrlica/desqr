@@ -2,7 +2,6 @@
 """
 Map the footprint.
 """
-
 import glob
 import os
 from os.path import join
@@ -82,19 +81,18 @@ if __name__ == "__main__":
     plotdir = mkdir('release/footprint')
 
     skymaps = [
-        #['any' ,sel_any  ],
+        ['any' ,sel_any  ],
         #['all' ,sel_grizY],
-        #['all' ,sel_griz ],
-        #['g'   ,sel_g    ],
-        #['r'   ,sel_r    ],
-        #['i'   ,sel_i    ],
-        #['z'   ,sel_z    ],
+        ['all' ,sel_griz ],
+        ['g'   ,sel_g    ],
+        ['r'   ,sel_r    ],
+        ['i'   ,sel_i    ],
+        ['z'   ,sel_z    ],
         #['Y'   ,sel_Y   ],
         ['gr'  ,sel_gr  ],
         #['iz'  ,sel_iz  ],
         ]
 
-    #import pdb; pdb.set_trace()
     for i,(n,s) in enumerate(skymaps):
         skymaps[i] += [empty(nside)]
 

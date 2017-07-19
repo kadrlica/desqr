@@ -8,8 +8,9 @@ import numpy as np
 import fitsio
 import healpy
 
-#from ugali.utils.logger import logger
-import logging as logger
+from ugali.utils.logger import logger
+#import logging as logger
+import logging
 import warnings
 
 # Tools for working with the shell
@@ -52,6 +53,7 @@ def multiproc(func,args,kwargs):
     return results
 
 def found(filename):
+    logger = logging.getLogger()
     logger.warning("Found %s; skipping..."%filename)
 
 def which(program):
@@ -119,7 +121,7 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
     --------
     None
     """
-
+    logger = logging.getLogger()
     #logger.info(filename)
     if not os.path.exists(filename):
         msg = "Requested file does not exist."
@@ -241,11 +243,13 @@ def ccdnum(infile,outfile=None,force=True):
     f.close()
 
 def load(args):
+    logger = logging.getLogger()
     infile,columns = args
     logger.debug("Loading %s..."%infile)
     return fitsio.read(infile,columns=columns)
 
 def load_infiles2(infiles,columns=None,multiproc=False):
+    logger = logging.getLogger()
     if isinstance(infiles,basestring):
         infiles = [infiles]
 
@@ -274,6 +278,7 @@ def load_infiles2(infiles,columns=None,multiproc=False):
     return data
 
 def load_infiles(infiles,columns=None,multiproc=False):
+    logger = logging.getLogger()
     if isinstance(infiles,basestring):
         infiles = [infiles]
 

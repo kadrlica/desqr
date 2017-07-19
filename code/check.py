@@ -75,7 +75,7 @@ def run_pool(func, args, **kwargs):
     """ Initialize the pool with a shared counter """
     global counter
     counter = Value('i',0)
-    pool = Pool(initializer=init_counter, initargs=(counter,),**kwargs)
+    pool = Pool(processes=30,initializer=init_counter, initargs=(counter,),**kwargs)
     return pool.map(func,args)
 
 def check_files(explist,files):
@@ -218,6 +218,17 @@ def check_nan(args):
 
     return ret
 
+def check_header_keys(args)
+    global counter
+    with counter.get_lock(): counter.value += 1
+    keys = np.atleast_1d(['RA','DEC'])
+    f,nfiles,band = args
+    print_running(counter.value,nfiles,indent=4,step=1)
+
+    fits = fitsio.FITS(f,'r')
+    names = fits[1].get_colnames()
+    fits.close()
+    return keys[~np.in1d(keys,names)]
 
 if __name__ == "__main__":
     import argparse

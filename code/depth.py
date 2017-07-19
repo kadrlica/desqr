@@ -9,7 +9,6 @@ try:             os.environ['DISPLAY']
 except KeyError: matplotlib.use('Agg')
 matplotlib.use('Agg')
 from multiprocessing import Pool
-import logging
 
 import fitsio
 import numpy as np
@@ -31,6 +30,7 @@ from footprint import blank,unseen
 import footprint
 import plotting
 from plotting import draw_footprint, draw_peak
+from utils import logger
 
 NSIDE = 1024
 
@@ -71,7 +71,7 @@ def draw_maglim_pixel(skymap,**kwargs):
     nside = healpy.npix2nside(len(skymap))
     pix = np.where(skymap > 0)
     if len(pix[0]) == 0:
-        logging.warn("No maglims found")
+        logger.warn("No maglims found")
         return
 
     ra,dec = pix2ang(nside,pix)
@@ -110,7 +110,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
     # magerr = -2.5/ln(10) * fluxerr/flux
     mag_snr = (2.5/np.log(10)) / (signal_to_noise)
 
-    logging.info(infile)
+    logger.info(infile)
     ret = dict()
     for band,mag,magerr,spread in zip(BANDS,MAGS,MAGERRS,SPREADS):
         data = fitsio.read(infile,columns=['RA','DEC',mag,magerr,spread])
@@ -122,7 +122,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
 
         d = data[cut]
         if len(d) < 2:
-            logging.warn("Insufficent objects in %s-band"%band)
+            logger.warn("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -139,7 +139,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
         np.seterr(**old)
 
         if cut_nan_inf.sum() < 2:
-            logging.warn("Insufficent objects in %s-band"%band)
+            logger.warn("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -160,7 +160,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
 def teff(infile,nside=NSIDE,mode='median'):
     TEFFS = bfields('TEFF',BANDS)
 
-    logging.info(infile)
+    logger.info(infile)
     ret = dict()
     for band,teff in zip(BANDS,TEFFS):
         data = fitsio.read(infile,columns=['RA','DEC',teff])
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.verbose:
-        logging.basicConfig(level=logging.INFO,stream=sys.stdout)
+        logger.setLevel(logger.INFO)
     
     if args.config:
         config = yaml.load(open(args.config))
@@ -207,16 +207,16 @@ if __name__ == "__main__":
 
     skymaps = dict()
     for b in BANDS:
-        logging.info("Filling %s-band..."%b)
+        logger.info("Filling %s-band..."%b)
         skymap = blank(NSIDE)
         for i,maglims in enumerate(out):
-            logging.info(str(i))
+            logger.info(str(i))
             skymap[maglims[b][0]] = maglims[b][1]
         skymaps[b] = np.ma.MaskedArray(skymap,np.isnan(skymap),fill_value=np.nan)
         outfile = join(outdir,'y2q1_maglim_%s_n%i_ring.fits'%(b,NSIDE))
-        logging.info("Writing %s..."%outfile)
+        logger.info("Writing %s..."%outfile)
         healpy.write_map(outfile,skymaps[b].data)
-        logging.info("Gzipping %s..."%outfile)
+        logger.info("Gzipping %s..."%outfile)
         subprocess.call('gzip -f %s'%outfile,shell=True)
         
     out = dict()

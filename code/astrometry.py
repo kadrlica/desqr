@@ -7,7 +7,7 @@ import matplotlib
 if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
     matplotlib.use('Agg')
 from collections import OrderedDict as odict
-import logging
+from multiprocessing import Pool
 
 import fitsio
 import numpy as np
@@ -16,22 +16,20 @@ import pylab as plt
 import matplotlib.colors as colors
 import healpy
 
-from multiprocessing import Pool
-
 from ugali.utils.healpix import ang2pix, pix2ang
 import ugali.utils.projector
 from ugali.utils.projector import angsep
 from ugali.utils.shell import mkdir
 
+import utils
 from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
 from utils import bfields, load_infiles, get_vizier_catalog
-import utils
-from footprint import blank
-import footprint
 from match import match_query
-from catalog import good_objects
-import plotting
 
+import footprint
+import plotting
+from footprint import blank
+from catalog import good_objects
 
 COLUMNS = [OBJECT_ID,'RA','DEC']
 

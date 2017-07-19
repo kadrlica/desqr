@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+Create the catalog-level coadd.
+"""
 import os, sys
 import time
 from collections import OrderedDict as odict
@@ -57,27 +60,6 @@ WAVGFLAGS = ['WAVG_'+f for f in FLAGS]
 
 WAVG = WAVGMAGS + WAVGSPREAD + WAVGFLAGS
 
-OUTPUT_COLS = odict(
-    [(i,('i8',-1)) for i in [OBJECT_ID]]
-    + [(c,('f8',np.nan)) for c in COORDS]
-    + [(i,('i8',-1)) for i in HEALPIX]
-    + [(f,('i2',0)) for f in bfields(NEPOCHS,BANDS)]
-    + [(f,('f4',BADMAG)) for f in bfields(MAGS,BANDS)]
-    + [(f,('f4',-1)) for f in bfields(SPREAD[:1],BANDS)]
-    + [(f,('f4',1)) for f in bfields(SPREAD[1:],BANDS)]
-    + [(f,('f4',-1)) for f in bfields(CLASS,BANDS)]
-    + [(f,('i2',99)) for f in bfields(FLAGS,BANDS)]
-    + [(f,('f4',BADMAG)) for f in bfields(WAVGMAGS,BANDS)]
-    + [(f,('f4',-1)) for f in bfields(WAVGSPREAD[:1],BANDS)]
-    + [(f,('f4',1)) for f in bfields(WAVGSPREAD[1:],BANDS)]
-    #+ [(f,('f4',-1)) for f in bfields(WAVGCLASS,BANDS)] # Y2Q1
-    + [(f,('i2',99)) for f in bfields(WAVGFLAGS,BANDS)]
-    + [(f,('i4',-1)) for f in bfields(EXPNUM,BANDS)]
-    + [(f,('f4',-1)) for f in bfields(TEFF,BANDS)]
-    + [(f,('f4',-1)) for f in bfields(IMAGE,BANDS)]
-    + [(f,('f4',-1)) for f in bfields(EXTINCTION,BANDS)]
-    )
-
 def verbose(func):
     """
     Decorator for timing functions
@@ -91,6 +73,30 @@ def verbose(func):
         return ret
 
     return wrapper
+
+def create_output_columns(bands):
+    """ Create an ordered dictionary of output column names. """
+    columns = odict(
+        [(i,('i8',-1)) for i in [OBJECT_ID]]
+        + [(c,('f8',np.nan)) for c in COORDS]
+        + [(i,('i8',-1)) for i in HEALPIX]
+        + [(f,('i2',0)) for f in bfields(NEPOCHS,bands)]
+        + [(f,('f4',BADMAG)) for f in bfields(MAGS,bands)]
+        + [(f,('f4',-1)) for f in bfields(SPREAD[:1],bands)]
+        + [(f,('f4',1)) for f in bfields(SPREAD[1:],bands)]
+        + [(f,('f4',-1)) for f in bfields(CLASS,bands)]
+        + [(f,('i2',99)) for f in bfields(FLAGS,bands)]
+        + [(f,('f4',BADMAG)) for f in bfields(WAVGMAGS,bands)]
+        + [(f,('f4',-1)) for f in bfields(WAVGSPREAD[:1],bands)]
+        + [(f,('f4',1)) for f in bfields(WAVGSPREAD[1:],bands)]
+        #+ [(f,('f4',-1)) for f in bfields(WAVGCLASS,bands)] # Y2Q1
+        + [(f,('i2',99)) for f in bfields(WAVGFLAGS,bands)]
+        + [(f,('i4',-1)) for f in bfields(EXPNUM,bands)]
+        + [(f,('f4',-1)) for f in bfields(TEFF,bands)]
+        + [(f,('f4',-1)) for f in bfields(IMAGE,bands)]
+        + [(f,('f4',-1)) for f in bfields(EXTINCTION,bands)]
+        )
+    return columns
 
 def maximum_index(input,labels,index=None):
     if index is None: index = np.unique(labels)
@@ -255,16 +261,26 @@ def best_values(values,best,labels,index=None):
     except TypeError:
         return values[argmax]
 
-def coadd_objects(data):
+def coadd_objects(data,bands=BANDS):
     """
     Create a unique object catalog.
+    
+    Parameters:
+    -----------
+    data  : the pre-band catalogs
+    bands : the bands to combine
+
+    Returns:
+    -------
+    cat,keys : the coadd catalog and associated matching keys
     """
     unique_ids = np.unique(data[OBJECT_ID])
     nobjs = len(unique_ids)
 
-    dtype = [(k,v[0]) for k,v in OUTPUT_COLS.items()]
+    output_columns = create_output_columns(bands)
+    dtype = [(k,v[0]) for k,v in output_columns.items()]
     cat = np.recarray(nobjs,dtype=dtype)
-    for k,v in OUTPUT_COLS.items():
+    for k,v in output_columns.items():
         cat[k] = v[1]
     cat[OBJECT_ID] = unique_ids
 
@@ -284,7 +300,7 @@ def coadd_objects(data):
     for i,f in enumerate(HEALPIX):
         cat[f] = x[i]
 
-    for b in BANDS:
+    for b in bands:
         logger.info("=== Creating %s-band catalog ==="%b)
         # This is an annoying feature of fitsio...
         band = '{0:<{1}}'.format(b,len(data[BAND][0]))
@@ -465,7 +481,7 @@ if __name__ == "__main__":
         logger.warning("No good objects found; exiting...")
         sys.exit()
         
-    cat,key = coadd_objects(good)
+    cat,key = coadd_objects(good,bands=BANDS)
     logger.info("Unique objects: %i"%len(cat))
  
     catalog,keys = quality_cuts(cat,key)

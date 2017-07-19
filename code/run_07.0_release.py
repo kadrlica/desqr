@@ -22,6 +22,7 @@ if __name__ == "__main__":
     parser.add_argument('-q','--queue',default='local')
     parser.add_argument('--section',action='append',choices=SECTIONS)
     parser.add_argument('-v','--verbose',action='store_true')
+    parser.add_argument('-n','--nside',default=1024,type=int)
     args = parser.parse_args()
     
     force = '-f' if args.force else ''
@@ -32,7 +33,7 @@ if __name__ == "__main__":
 
     if 'footprint' in sections:
         exe = os.path.join(path,'footprint.py')
-        cmd = 'python %s -n 1024 --survey %s'%(exe,config.get('survey','des'))
+        cmd = 'python %s -n %i --survey %s'%(exe,args.nside,config.get('survey','des'))
         if args.verbose: cmd += ' -v'
             
         if args.queue == 'local':
@@ -45,7 +46,7 @@ if __name__ == "__main__":
         
     if 'depth' in sections:
         exe = os.path.join(path,'depth.py')
-        cmd = 'python %s'%exe
+        cmd = 'python -n %i %s'%(args.nside,exe)
         if args.verbose: cmd += ' -v'
 
         if args.queue == 'local':

@@ -16,8 +16,8 @@ import utils
 from const import BADMAG,BADZP
 
 DATACOLS = ['EXPNUM','CCDNUM','FLUX_PSF','FLUXERR_PSF','FLUX_AUTO','FLUXERR_AUTO']
-ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','ZP_FLAG']
-OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','ZP_FLAG']
+ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
+OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
 
 def calc_mag(flux,zeropoint):
     mag = -2.5 * np.log10(flux) + zeropoint
@@ -105,6 +105,20 @@ def read_zeropoint(zeropoint,blacklist=None):
         return zp[~idx]
 
 def zeropoint(data,zp):
+    """
+    Match zeropoints to objects based on expnum,ccdnum.
+
+    ADW: This could be better done with pandas.DataFrame.merge
+
+    Parameters:
+    -----------
+    data : the input catalog data
+    zp   : the input zeropoints (expnum,ccdnum)
+
+    Returns:
+    --------
+    out  : catalog of calibrated magnitude and zeropoints
+    """
     out = np.recarray(len(data),dtype=[(n,'f4') for n in OUTCOLS])
     out.fill(BADMAG)
     out['ZP_FLAG'].fill(BADZP)
@@ -131,8 +145,9 @@ def zeropoint(data,zp):
         for x in ['PSF','AUTO']:
             out['MAG_'+x][didx] = calc_mag(d['FLUX_'+x],z['MAG_ZERO'][cidx])
             out['MAGERR_'+x][didx] = calc_magerr(d['FLUX_'+x],d['FLUXERR_'+x])
-        out['ZP_FLAG'][didx] = z['ZP_FLAG'][cidx]
         out['MAG_ZERO'][didx] = z['MAG_ZERO'][cidx]
+        out['SIGMA_MAG_ZERO'][didx] = z['SIGMA_MAG_ZERO'][cidx]
+        out['ZP_FLAG'][didx] = z['ZP_FLAG'][cidx]
 
     return out
 

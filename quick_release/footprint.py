@@ -8,6 +8,7 @@ from os.path import join
 import matplotlib
 if not os.getenv('DISPLAY'):    matplotlib.use('Agg')
 if os.getenv('TERM')=='screen': matplotlib.use('Agg')
+from collections import OrderedDict as odict
 
 import fitsio
 import numpy as np
@@ -15,6 +16,7 @@ import scipy.ndimage as nd
 import pylab as plt
 import matplotlib.colors as colors
 import healpy
+import yaml
 
 from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
 from utils import bfields, load_infiles, mkdir
@@ -22,10 +24,11 @@ from utils import ang2pix,pix2ang
 import plotting
 
 # Coverage Footprint
-
-COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)
-#COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)+bfields('NEPOCHS',BANDS)
-
+def create_columns(bands=BANDS):
+    COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',bands)
+    #COLUMNS = ['RA','DEC']+bfields('WAVG_MAG_PSF',BANDS)+bfields('NEPOCHS',BANDS)
+    return COLUMNS
+    
 def empty(nside): 
     return np.zeros(healpy.nside2npix(nside),dtype=int)
 
@@ -60,41 +63,51 @@ sel_iz    = lambda x: sel_i(x) & sel_z(x)
 sel_griz  = lambda x: sel_g(x) & sel_r(x) & sel_i(x) & sel_z(x)
 sel_grizY = lambda x: sel_g(x) & sel_r(x) & sel_i(x) & sel_z(x) & sel_Y(x)
 sel_all   = sel_grizY
-#sel_g     = lambda x: select(x,'WAVG_MAG_PSF_G',21.0)
-#sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R',21.0) 
+sel_g     = lambda x: select(x,'WAVG_MAG_PSF_G',22.0)
+sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R',22.0) 
+sel_gr    = lambda x: sel_g(x) & sel_r(x)
 #sel_i     = lambda x: select(x,'WAVG_MAG_PSF_I',21.0) 
 #sel_z     = lambda x: select(x,'WAVG_MAG_PSF_Z',21.0) 
 #sel_Y     = lambda x: select(x,'WAVG_MAG_PSF_Y',21.0) 
+
+SELECT = odict([
+    ['any' ,sel_any  ],
+    ['g'   ,sel_g    ],
+    ['r'   ,sel_r    ],
+    ['i'   ,sel_i    ],
+    ['z'   ,sel_z    ],
+    ['Y'   ,sel_Y   ],
+    ['gr'  ,sel_gr  ],
+    ['iz'  ,sel_iz  ],
+    ['griz' ,sel_griz ],
+    ['grizY' ,sel_grizY ],
+    ])
 
 if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',nargs='?')
+    parser.add_argument('config')
     parser.add_argument('-n','--nside',default=1024,type=int)
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-s','--survey',default='des')
+    parser.add_argument('-b','--band',action='append',default=None)
+                        
     args = parser.parse_args()
 
+    config = yaml.load(open(args.config))
     nside = args.nside
     pixarea = healpy.nside2pixarea(nside,degrees=True)
     plotdir = mkdir('release/footprint')
+    bands = config['bands']
+    if not args.band: 
+        args.band = ['any'] + bands + [''.join(bands)]
 
-    skymaps = [
-        ['any' ,sel_any  ],
-        #['all' ,sel_grizY],
-        ['all' ,sel_griz ],
-        ['g'   ,sel_g    ],
-        ['r'   ,sel_r    ],
-        ['i'   ,sel_i    ],
-        ['z'   ,sel_z    ],
-        #['Y'   ,sel_Y   ],
-        ['gr'  ,sel_gr  ],
-        #['iz'  ,sel_iz  ],
-        ]
-
-    for i,(n,s) in enumerate(skymaps):
-        skymaps[i] += [empty(nside)]
+    COLUMNS = create_columns(bands)
+    skymaps = []
+    for i,k in enumerate(args.band):
+        print("Adding %s-band selection..."%k)
+        skymaps.append([k,SELECT[k],empty(nside)])
 
     infiles = sorted(glob.glob('cat/cat_hpx_*.fits'))
     for f in infiles:
@@ -120,18 +133,31 @@ if __name__ == "__main__":
         skymap = np.ma.MaskedArray(np.log10(density),counts == 0,fill_value=np.nan)
         area = pixarea * (counts > 0).sum() 
         out['area'] = area
-        plt.figure()
+        plt.figure(figsize=(10, 6.18))
         if args.survey == 'des':
-            im = plotting.draw_des(skymap,cmap='viridis')
+            from skymap.survey import DESSkymap
+            smap = DESSkymap()
+            smap.draw_des()
+            #im = plotting.draw_des(skymap,cmap='viridis')
         elif args.survey == 'maglites':
-            im = plotting.draw_maglites(skymap,cmap='viridis')
+            from skymap.survey import MaglitesSkymap
+            smap = MaglitesSkymap()
+            smap.draw_maglites()
+            #smap.draw_lmc(); smap.draw_smc()
+            #im = plotting.draw_maglites(skymap,cmap='viridis')
         elif args.survey == 'bliss':
-            im = plotting.draw_bliss(skymap,cmap='viridis')
+            from skymap.survey import BlissSkymap
+            smap = BlissSkymap()
+            smap.draw_bliss()
+            #im = plotting.draw_bliss(skymap,cmap='viridis')
         else:
-            im = plotting.draw_footprint(skymap,cmap='viridis')
+            smap = SurveySkymap()
+            #im = plotting.draw_footprint(skymap,cmap='viridis')
+            
+        im,_lon,_lat,_val = smap.draw_hpxmap(skymap,cmap='viridis')
         plt.colorbar(im,label=r'$\log_{10}({\rm Density}\ [\deg^{-2}])$')
-        plt.title("Coverage (%s)"%name)
-        outfile = join(plotdir,'footprint_%s_n%i_car.png'%(name,nside))
+        plt.suptitle("Coverage (%s)"%name)
+        outfile = join(plotdir,'footprint_%s_n%i.png'%(name,nside))
         print "Writing %s..."%outfile
         plt.savefig(outfile,bbox_inches='tight')
         out['map'] = os.path.basename(outfile)

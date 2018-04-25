@@ -37,6 +37,7 @@ def read_blacklist(blacklist):
         ext = os.path.splitext(blacklist)[-1]
         if ext == '.csv':
             bl = pd.read_csv(blacklist).to_records(index=False)
+            bl.dtype.names = map(str.upper,bl.dtype.names)
         elif ext == '.fits':
             bl = fitsio.read(blacklist)
         else:

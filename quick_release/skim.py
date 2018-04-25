@@ -22,5 +22,5 @@ if __name__ == "__main__":
 
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.getLogger().setLevel(level)
-
+    
     utils.skim_data(args.infile,args.outfile,args.columns,args.select,args.force)

@@ -9,6 +9,7 @@ import numpy as np
 import healpy
 from ugali.utils.shell import mkdir
 from utils import found
+from const import BANDS
 
 SECTIONS = ['footprint','astrometry','depth']
 
@@ -22,7 +23,8 @@ if __name__ == "__main__":
     parser.add_argument('-q','--queue',default='local')
     parser.add_argument('--section',action='append',choices=SECTIONS)
     parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('-n','--nside',default=1024,type=int)
+    parser.add_argument('-n','--nside',default=None,type=int)
+    parser.add_argument('-b','--band',default=None,action='append')
     args = parser.parse_args()
     
     force = '-f' if args.force else ''
@@ -33,9 +35,13 @@ if __name__ == "__main__":
 
     if 'footprint' in sections:
         exe = os.path.join(path,'footprint.py')
-        cmd = 'python %s -n %i --survey %s'%(exe,args.nside,config.get('survey','des'))
+        survey = config.get('survey','des')
+        nside = 2048 if args.nside is None else args.nside
+        cmd = 'python %s %s -n %i --survey %s'%(exe,args.config,nside,survey)
         if args.verbose: cmd += ' -v'
-            
+        if args.band: bands = args.band
+        else:         bands = config['bands'] + [''.join(config['bands'])]
+        cmd += ' '+' '.join(['-b '+b for b in bands])
         if args.queue == 'local':
             print cmd
             submit = cmd
@@ -45,6 +51,7 @@ if __name__ == "__main__":
         subprocess.call(submit,shell=True)
         
     if 'depth' in sections:
+        nside = 1024 if args.nside is None else args.nside
         exe = os.path.join(path,'depth.py')
         cmd = 'python -n %i %s'%(args.nside,exe)
         if args.verbose: cmd += ' -v'
@@ -59,7 +66,8 @@ if __name__ == "__main__":
 
     if 'astrometry' in sections:
         exe = os.path.join(path,'astrometry.py')
-        cmd = 'python %s %s'%(exe,args.config)
+        # r-band only
+        cmd = 'python %s %s --band r'%(exe,args.config)
         if args.verbose: cmd += ' -v'
 
         if args.queue == 'local':

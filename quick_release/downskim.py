@@ -39,6 +39,8 @@ def bliss_selection(data):
     sel &= 1.0857362*(data['FLUXERR_PSF']/data['FLUX_PSF']) < 0.5
     np.seterr(**olderr)
     return sel
+
+maglites_selection = bliss_selection
     
 def create_output(data,exp):
     out = np.recarray(len(data),dtype=DTYPES)
@@ -69,7 +71,7 @@ def create_catalog(filename):
             
     cat['FILENAME'] = os.path.basename(filename)
     cat['PFW_ATTEMPT_ID'] = int(str(hdr['EXPNUM'])+'01')
-    cat['TAG'] = 'BLISS'
+    cat['TAG'] = TAG
     cat['UNITNAME'] = 'D%08d'%hdr['EXPNUM']
     cat['REQNUM'] = 1
     cat['ATTNUM'] = 1
@@ -139,16 +141,23 @@ if __name__ == "__main__":
     logging.getLogger().setLevel(level)
 
     explist = pd.read_csv(args.explist).to_records()
+    explist.dtype.names = map(str.upper,explist.dtype.names)
     exp = explist[explist['EXPNUM'] == args.expnum]
 
     if len(exp) == 0:
         raise ValueError("EXPNUM not found: %s"%args.expnum)
     elif len(exp) > 1:
-        raise ValueError("Multiple values for EXPNUM found: %s"%args.expnum)
+        msg = "Multiple values for EXPNUM found: %s"%args.expnum
+        for e in exp:
+            msg += ("\n"+e)
+        raise ValueError()
     exp = exp[0]
 
+    TAG = args.tag
     if args.tag == 'BLISS':
         select = bliss_selection
+    elif 'MAGLITES' in args.tag :
+        select = maglites_selection
     else:
         raise Exception('Tag not found: %s'%args.tag)
 

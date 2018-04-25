@@ -310,7 +310,7 @@ if __name__ == "__main__":
     skymaps = odict()
 
     for band in opts.band:
-    
+        print 'Calculating astrometry for %s-band...'%band
         hpxdir = join(config['hpxdir'],band)
          
         if opts.pix is not None:
@@ -346,7 +346,7 @@ if __name__ == "__main__":
         #results = [astrometry(*args[-1],**kwargs)]
          
         #args = [(pix,nside) for pix in pixels][:10]
-        #p = Pool(maxtasksperchild=1)
+        #p = Pool(maxtasksperchild=1,processes=20)
         #out = p.map(astrometry,args)
          
         skymap = blank(nside)

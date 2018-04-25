@@ -13,6 +13,11 @@ from ugali.utils.shell import mkdir
 
 HPXBASE = 'hpx_%05d.fits'
 
+# Alternative RA,DEC names
+ALT_RADEC_COLUMNS = [
+    ['ALPHAWIN_J2000','DELTAWIN_J2000'],
+    ]
+
 def ang2pix(nside, lon, lat, nest=False):
     """
     Input (lon, lat) in degrees instead of (theta, phi) in radians
@@ -36,13 +41,10 @@ def readfile(filename):
     data = f[idx].read()
     f.close()
 
-    ALT_RADEC_COLUMNS = [
-        ['ALPHAWIN_J2000','DELTAWIN_J2000'],
-        ]
 
     names = list(data.dtype.names)
     if ('RA' not in names) and ('DEC' not in names):
-        for ra,dec in ALT_RADEC_COLUMNS:
+        for ra,dec in np.char.upper(ALT_RADEC_COLUMNS):
             if (ra in names) and (dec in names):
                 names[names.index(ra)] = 'RA'
                 names[names.index(dec)] = 'DEC'
@@ -104,6 +106,8 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
                 logger.debug("Creating %s"%outfile)
                 out=fitsio.FITS(outfile,mode='rw')
                 out.write(arr)
+                out[1].write_key('COORDSYS','CEL',comment='Coordinate system')
+                out[1].write_key('ORDERING','RING',comment='HEALPix ordering scheme')
                 out[1].write_key('NSIDE',nside,comment='HEALPix nside')
                 out[1].write_key('HPX',pix,comment='HEALPix pixel (RING)')
                 out[1].write_key('BAND',band,comment='Photometric band')
@@ -118,18 +122,26 @@ if __name__ == "__main__":
     import argparse
     description = "python script"
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('indir',help='Input directory')
-    parser.add_argument('outdir',help='Output directory')
-    parser.add_argument('-o','--outbase',default=HPXBASE)
-    parser.add_argument('-n','--nside',default=16,type=int)
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-v','--verbose',action='store_true')
-    opts = parser.parse_args()
+    parser.add_argument('indir',help='input directory')
+    parser.add_argument('outdir',help='output directory')
+    parser.add_argument('--ra-dec',nargs=2,
+                        help='names of input RA,DEC columns (case insensitive)')
+    parser.add_argument('-o','--outbase',default=HPXBASE,
+                        help='output file basename')
+    parser.add_argument('-n','--nside',default=16,type=int,
+                        help='output nside')
+    parser.add_argument('-f','--force',action='store_true',
+                        help='overwrite existing files')
+    parser.add_argument('-v','--verbose',action='store_true',
+                        help='output verbosity')
+    args = parser.parse_args()
 
-    if opts.verbose: logger.setLevel(logger.DEBUG)
+    if args.verbose: logger.setLevel(logger.DEBUG)
+    if args.ra_dec:
+        ALT_RADEC_COLUMNS = [args.ra_dec] + ALT_RADEC_COLUMNS
 
     for ext in ['.fits','.fits.gz']:
-        infiles = sorted(glob.glob(opts.indir+'/*'+ext))
+        infiles = sorted(glob.glob(args.indir+'/*'+ext))
         if infiles: break
 
-    pixelize(infiles,opts.outdir,opts.outbase,nside=opts.nside,force=opts.force)
+    pixelize(infiles,args.outdir,args.outbase,nside=args.nside,force=args.force)

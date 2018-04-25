@@ -7,6 +7,7 @@ import glob
 
 import numpy as np
 from utils import mkdir
+import download
 
 if __name__ == "__main__":
     import argparse
@@ -24,12 +25,15 @@ if __name__ == "__main__":
     rawdir = config['rawdir']
     explist = config['explist']
     tags = config.get('tags')
+    section = config.get('db','bliss')
     
     if os.path.exists(explist) and not args.force:
         print "Found %s; skipping download..."%explist
     else:
-        msg = "Missing exposure list: %s"%explist
-        raise Exception(msg)
+        query = download.exposure_query(tags)
+        print query
+        sqlfile = os.path.splitext(explist)[0]+'.sql'
+        download.download(explist,query,sqlfile=sqlfile,section=section,force=args.force)
 
     exposures = np.recfromcsv(explist)
     for band in config['bands']:

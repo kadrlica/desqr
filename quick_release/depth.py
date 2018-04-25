@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
     infiles = sorted(glob.glob('cat/cat_hpx_*.fits'))
     
-    p = Pool(maxtasksperchild=1)
+    p = Pool(maxtasksperchild=1,processes=20)
     out = p.map(depth,infiles)
 
     skymaps = dict()

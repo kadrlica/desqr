@@ -25,7 +25,8 @@ if __name__ == "__main__":
     rawdir = config['rawdir']
     explist = config['explist']
     tags = config.get('tags')
-    
+    section = config.get('db','dessci')
+
     if os.path.exists(explist) and not args.force:
         print "Found %s; skipping download..."%explist
     else:

@@ -63,6 +63,13 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
     return lon_out % 360.,lat_out
 
 def match_query(lon1,lat1,lon2,lat2,eps=0.01):
+    """
+    Returns:
+    --------
+    idx1 : index into the first array
+    idx2 : index into the second array
+    ds   : angular separtion (deg)
+    """
     coords1 = projector(lon1,lat1)
     coords2 = projector(lon2,lat2)
  

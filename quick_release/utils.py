@@ -8,6 +8,7 @@ import numpy as np
 import fitsio
 import healpy
 
+# Need to do better with the logging...
 from ugali.utils.logger import logger
 #import logging as logger
 import logging
@@ -18,9 +19,17 @@ def pwd():
     # Careful, won't work after a call to os.chdir...
     return os.environ['PWD']
 
-def mkdir(dir):
-    if not os.path.exists(dir):  os.makedirs(dir)
-    return dir
+def mkdir(path):
+    # https://stackoverflow.com/a/600612/4075339
+    import errno
+    try:
+        os.makedirs(path)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
+    return path
 
 def mkscratch():
     if os.path.exists('/scratch/'):    
@@ -53,7 +62,7 @@ def multiproc(func,args,kwargs):
     return results
 
 def found(filename):
-    logger = logging.getLogger()
+    #logger = logging.getLogger()
     logger.warning("Found %s; skipping..."%filename)
 
 def which(program):
@@ -121,8 +130,8 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
     --------
     None
     """
-    logger = logging.getLogger()
-    #logger.info(filename)
+    #logger = logging.getLogger()
+    logger.info(filename)
     if not os.path.exists(filename):
         msg = "Requested file does not exist."
         raise IOError(msg)
@@ -243,13 +252,13 @@ def ccdnum(infile,outfile=None,force=True):
     f.close()
 
 def load(args):
-    logger = logging.getLogger()
+    #logger = logging.getLogger()
     infile,columns = args
     logger.debug("Loading %s..."%infile)
     return fitsio.read(infile,columns=columns)
 
 def load_infiles2(infiles,columns=None,multiproc=False):
-    logger = logging.getLogger()
+    #logger = logging.getLogger()
     if isinstance(infiles,basestring):
         infiles = [infiles]
 
@@ -278,7 +287,7 @@ def load_infiles2(infiles,columns=None,multiproc=False):
     return data
 
 def load_infiles(infiles,columns=None,multiproc=False):
-    logger = logging.getLogger()
+    #logger = logging.getLogger()
     if isinstance(infiles,basestring):
         infiles = [infiles]
 
@@ -350,7 +359,8 @@ def parse_formula(formula):
 
     columns = []
     for x in formula.split('data[')[1:]:
-        columns += x.split(']')[0].replace('"','').replace("'",'')
+        col = x.split(']')[0].replace('"','').replace("'",'')
+        columns += [col]
 
     return columns
 

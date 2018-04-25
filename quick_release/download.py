@@ -297,7 +297,7 @@ def finalcut_exposure_query(program='survey',tag='Y3A1_FINALCUT'):
     if tag in ('Y2A1_FINALCUT','Y3A1_FINALCUT'):
         tag = 'Y3A1_FINALCUT'
 
-    ### From Robert, the definition of qa.flag is:
+    ### From Robert, the definition of qa_summary qa.flag is:
     ###
     ###    1: Under Teff_Limit
     ###    2: No T_eff possible
@@ -411,9 +411,52 @@ from prod.finalcut_eval ev, prod.exposure e, prod.ops_proctag t
 WHERE ev.expnum = e.expnum and t.tag = 'Y3A1_MAGLITES'
 and ev.unitname = t.unitname and ev.reqnum = t.reqnum and ev.attnum = t.attnum
 ORDER BY e.expnum;"""
+    elif tag == 'MAGLITES_R4':
+        # This uses the bliss database
+        query = """-- R4 MagLiteS BLISS processing
+SELECT e.expnum||'01' as PFW_ATTEMPT_ID, e.expnum,
+'D00'||e.expnum as unitname,
+1 as reqnum, 1 as attnum, e.radeg as telra, e.decdeg as teldec, 
+e.nite, e.band, q.t_eff, 0 as flag, '%(tag)s' as tag 
+FROM exposure e, qa_summary q
+where e.expnum = q.expnum 
+and e.propid = '2016A-0366'
+and e.band in ('g','r') 
+and e.radeg is not NULL and e.decdeg is not NULL
+and q.t_eff > 0.1 and e.exptime > 59 and e.obstype = 'object'
+ORDER BY e.expnum"""%dict(tag=tag)
     else:
         msg = "Unrecognized tag: %s"%tag
         raise Exception(msg)
+    return query
+
+def bliss_exposure_query(tag=None):
+    if not tag:
+        query = """select e.expnum||'01' as PFW_ATTEMPT_ID, e.expnum,
+'D00'||e.expnum as unitname,
+1 as reqnum, 1 as attnum, e.radeg as telra, e.decdeg as teldec, 
+e.nite, e.band, q.t_eff, 0 as flag, 'BLISS' as tag 
+from exposure e, qa_summary q where 
+e.expnum = q.expnum
+and e.propid != '2012B-0001' and e.propid not like '*-9999'
+and e.band in ('g','r','i','z') 
+and e.radeg is not NULL and e.decdeg is not NULL
+and q.t_eff > 0.1 and q.t_eff * e.exptime > 30
+order by e.expnum"""
+    else:
+        query = """select e.expnum||'01' as PFW_ATTEMPT_ID, e.expnum,
+'D00'||e.expnum as unitname,
+1 as reqnum, 1 as attnum, e.radeg as telra, e.decdeg as teldec, 
+e.nite, e.band, q.t_eff, 0 as flag, 'BLISS' as tag 
+from exposure e, qa_summary q, proctag t where 
+e.expnum = q.expnum and e.expnum = t.expnum
+and t.tag = '%(tag)s'
+and e.propid != '2012B-0001' and e.propid not like '*-9999'
+and e.band in ('g','r','i','z') 
+and e.radeg is not NULL and e.decdeg is not NULL
+and q.t_eff > 0.1 and q.t_eff * e.exptime > 30
+order by e.expnum"""%dict(tag=tag)
+        
     return query
 
 def y2q_zeropoint_query():
@@ -473,19 +516,33 @@ from Y1A1_IMAGE where ZEROPOINT is not NULL;
 """
     return query
 
-def maglites_zeropoint_query():
-    query = """-- Zeropoints for maglites from PSM solution
+def maglites_zeropoint_query(tag=None):
+    if False:
+        query = """-- Zeropoints for maglites from PSM solution
 select EXPNUM_1 as EXPNUM, CCDNUM_1 as CCDNUM, BAND, 
 RA_CENT as RA, DEC_CENT as DEC,
 MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
 from dtucker.MAGLITES_PSM_ZPS_EBV@DESSCI
 order by EXPNUM, CCDNUM;
 """
-    query = """-- Zeropoints for maglites
+    elif tag is None:
+        query = """-- Zeropoints for maglites
 select EXPNUM, CCDNUM, BAND, RA_CENT as RA, DEC_CENT as DEC,
 MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
 from DTUCKER.MAGLITES_APASS_DES_ZPS_EBV@DESSCI
 order by EXPNUM, CCDNUM;
+"""
+    elif tag == 'MAGLITES_R4':
+        query = """-- Zeropoint query for ostgres database
+select z.EXPNUM, z.CCDNUM, z.BAND, 
+i.RA_CENT as RA, i.DEC_CENT as DEC,
+z.MAG_ZERO, z.SIGMA_MAG_ZERO, z.FLAG as EXPCALIB_FLAG, 
+CASE WHEN z.FLAG < 0 THEN 1 ELSE 0 END as ZP_FLAG
+from zeropoint z, exposure e, image i
+where e.expnum = i.expnum and i.expnum = z.expnum and i.ccdnum = z.ccdnum
+and z.band in ('g','r') and e.propid = '2016A-0366'
+and e.exptime > 59 and e.obstype = 'object'
+order by z.EXPNUM, z.CCDNUM
 """
     return query
 
@@ -500,8 +557,11 @@ order by EXPNUM, CCDNUM;
 def bliss_zeropoint_query():
     # postgres
     query = """-- Zeropoint query for bliss on the postgres database
-select EXPNUM, CCDNUM, BAND, MAG_ZERO, SIGMA_MAG_ZERO, FLAG as ZP_FLAG
-from zeropoints order by EXPNUM, CCDNUM;
+select EXPNUM, CCDNUM, BAND, MAG_ZERO, SIGMA_MAG_ZERO, FLAG as EXPCALIB_FLAG, 
+CASE WHEN FLAG < 0 THEN 1 ELSE 0 END as ZP_FLAG
+from zeropoint 
+where band in ('g','r','i','z')
+order by EXPNUM, CCDNUM
 """
     return query
 
@@ -511,6 +571,8 @@ def zeropoint_query(tags=None):
         return y2q_zeropoint_query()       
     if 'MAGLITES_FIRSTCUT' in tags:
         return maglites_zeropoint_query()
+    if 'MAGLITES_R4' in tags:
+        return maglites_zeropoint_query(tag='MAGLITES_R4')
     if 'BLISS' in tags:
         return bliss_zeropoint_query()
 
@@ -529,8 +591,12 @@ def exposure_query(tags=None,program='survey'):
         queries.append(maglites_exposure_query('MAGLITES_FIRSTCUT'))
     elif 'Y3A1_MAGLITES' in tags:
         queries.append(maglites_exposure_query('Y3A1_MAGLITES'))
+    elif 'MAGLITES_R4' in tags:
+        queries.append(maglites_exposure_query('MAGLITES_R4'))
     if ('Y2A1_FINALCUT' in tags) or ('Y3A1_FINALCUT' in tags):
         queries.append(finalcut_exposure_query(program,tag='Y2A1_FINALCUT'))
+    if 'BLISS_Y17T2' in tags:
+        queries.append(bliss_exposure_query(tag='BLISS_Y17T2'))
 
     if not queries:
         msg = 'Unrecognized tag: %s'%tags
@@ -553,12 +619,15 @@ def or_download(outfile,query,sqlfile=None,section='desoper',force=False):
         sqlfile = sql.name
         remove = True
 
+    #cmd = 'easyaccess -s %s -l %s'%(section,sqlfile)
+    cmd = 'easyaccess --config set loading_bar=no -s %s -l %s'%(section,sqlfile)
+
+    sql.write("-- Download with:\n")
+    sql.write("-- %s"%cmd + '\n')
     sql.write(query)
     sql.write('\n'+'> %s \n'%outfile)
     sql.close()
     
-    #cmd = 'easyaccess -s %s -l %s'%(section,sqlfile)
-    cmd = 'easyaccess --config set loading_bar=no -s %s -l %s'%(section,sqlfile)
     print cmd
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
@@ -575,13 +644,15 @@ def pg_download(outfile,query,sqlfile=None,section='BLISS',force=False):
         sql = tempfile.NamedTemporaryFile(delete=False)
         sqlfile = sql.name
         remove = True
-        
+
+    cmd = 'psql -h des51.fnal.gov %s -f %s > %s'%(section.upper(),sqlfile,outfile)        
+    sql.write("-- Download with:\n")
+    sql.write("-- %s"%cmd+'\n')
     sql.write(r"COPY("+'\n')
     sql.write(query.rstrip().rstrip(';'))
     sql.write("\n) to STDOUT WITH CSV HEADER DELIMITER ','; \n")
     sql.close()
-    
-    cmd = 'psql -h des51.fnal.gov %s -f %s > %s'%(section.upper(),sqlfile,outfile)
+
     print cmd
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
@@ -619,7 +690,8 @@ if __name__ == "__main__":
     elif args.tag in ['Y3A1_FINALCUT']:
         query = pfw_object_query(args.pfw_attempt_id,args.tag)
     else:
-        raise Exception('Tag not found: %s'%args.tag)
+        msg = 'Tag not found: %s'%args.tag
+        raise Exception(msg)
 
     download(args.outfile,query,args.loadsql,section,args.force)
 

@@ -90,7 +90,7 @@ def draw_footprint(skymap,proj='car',**kwargs):
     ax.set_xlim(xmin,xmax)
     ax.set_ylim(ymin,ymax)
 
-    ax.grid()
+    ax.grid(ls=':',color='black',lw=0.5)
     return im
 
 def draw_des(skymap,proj='car',**kwargs):
@@ -152,7 +152,7 @@ def draw_pixel(skymap,**kwargs):
     ax.set_ylabel('DEC (deg)')
     ax.set_xlim(xmax,xmin)
     ax.set_ylim(ymin,ymax)
-    ax.grid()
+    ax.grid(ls=':',color='black',lw=0.5)
     return im
 
 

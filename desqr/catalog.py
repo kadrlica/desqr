@@ -22,7 +22,7 @@ import scipy.ndimage as nd
 from ugali.utils.logger import logger
 import ugali.utils.projector
 
-# Input columns
+# Columns that are loaded into memory
 BAND = 'BAND'
 #IDX = [OBJECT_ID,BAND] + ['FILENAME','REQNUM','ATTNUM','OBJECT_NUMBER','TAG']
 IDX = [OBJECT_ID,BAND] + ['FILENAME','PFW_ATTEMPT_ID','OBJECT_NUMBER','TAG']
@@ -36,7 +36,7 @@ CLASS = ['CLASS_STAR']
 #FLAGS = ['FLAGS','QSLR_FLAG'] # Y2Q1
 FLAGS = ['FLAGS']
 NEPOCHS = ['NEPOCHS']
-TEFF = ['T_EFF']
+TEFF = ['T_EFF','EXPTIME']
 EXPNUM = ['EXPNUM','CCDNUM']
 #EXTINCTION = ['EXTINCTION']
 EXTINCTION = []
@@ -319,13 +319,13 @@ def coadd_objects(data,bands=BANDS):
         idx = np.searchsorted(cat[OBJECT_ID],index)
 
         # Set the unique keys
-        i = best_values(sel,d['T_EFF'],labels,index)
+        i = best_values(sel,d['T_EFF']*d['EXPTIME'],labels,index)
         keys[UNIQUE_ID][i] = keys[OBJECT_ID][i]
         
         for f in NEPOCHS:
             cat[bfields(f,b)][idx] = counts
 
-        x = best_values(d[BEST],d['T_EFF'],labels,index)
+        x = best_values(d[BEST],d['T_EFF']*d['EXPTIME'],labels,index)
         for i,f in enumerate(BEST):
             cat[bfields(f,b)][idx] = x[i]
 

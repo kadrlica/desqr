@@ -83,6 +83,7 @@ def create_catalog(filename):
     cat['T_EFF'] = -1
     cat['RA'] = data['ALPHAWIN_J2000']
     cat['DEC'] = data['DELTAWIN_J2000']
+    cat['OBJECT_NUMBER'] = data['NUMBER']
     cat['BAND'] = hdr['FILTER']
     return cat
 

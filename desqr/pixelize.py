@@ -3,6 +3,7 @@ import os,shutil
 import glob
 import numpy as np
 import fitsio
+import pandas as pd
 import numpy.lib.recfunctions as recfuncs
 import healpy
 
@@ -18,6 +19,10 @@ ALT_RADEC_COLUMNS = [
     ['ALPHAWIN_J2000','DELTAWIN_J2000'],
     ]
 
+# Object to string conversion
+OBJ = '|O'
+STR = '|S30'
+
 def ang2pix(nside, lon, lat, nest=False):
     """
     Input (lon, lat) in degrees instead of (theta, phi) in radians
@@ -30,17 +35,27 @@ def readfile(filename):
     """
     Abstract file reading to deal with raw catalog files.
     """
-    f = fitsio.FITS(filename,'r',upper=True)
-    idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
-    nrows = f[idx].get_nrows()
-    logger.info("%i objects found"%nrows)
-    if not nrows: 
+    base,ext = os.path.splitext(filename)
+    if np.char.endswith(filename,['.fits','.fits.gz','.fz']).sum():
+        f = fitsio.FITS(filename,'r',upper=True)
+        idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
+        nrows = f[idx].get_nrows()
+        logger.info("%i objects found"%nrows)
+        if not nrows: 
+            f.close()
+            return
+         
+        data = f[idx].read()
         f.close()
-        return
-
-    data = f[idx].read()
-    f.close()
-
+    elif np.char.endswith(filename, ['.csv','.csv.gz']).sum():
+        # This is not perfect, but hey, it works...
+        data = pd.read_csv(filename,encoding='ascii').to_records(index=False)
+        dtype = [(str(n).upper(),d if d!=OBJ else STR) for n,d in data.dtype.descr]
+        data = data.astype(dtype) # not efficient...
+        nrows = len(data)
+        logger.info("%i objects found"%nrows)
+        if not nrows: 
+            return
 
     names = list(data.dtype.names)
     if ('RA' not in names) and ('DEC' not in names):
@@ -67,7 +82,9 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
         msg = "Found files: %s"%glob.glob(outdir+'/*.fits')
         raise Exception(msg)
 
-    if len(outfiles): map(os.remove,outfiles)
+    #if len(outfiles): 
+    #    print("Removing existing files...")
+    #    map(os.remove,outfiles)
 
     for ii,infile in enumerate(infiles):
         logger.info('(%i/%i) %s'%(ii+1, len(infiles), infile))
@@ -140,7 +157,8 @@ if __name__ == "__main__":
     if args.ra_dec:
         ALT_RADEC_COLUMNS = [args.ra_dec] + ALT_RADEC_COLUMNS
 
-    for ext in ['.fits','.fits.gz']:
+    # Grab fits or csv files
+    for ext in ['.fits','.fits.gz','.csv','.csv.gz']:
         infiles = sorted(glob.glob(args.indir+'/*'+ext))
         if infiles: break
 

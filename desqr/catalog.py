@@ -317,7 +317,7 @@ def coadd_objects(data,bands=BANDS):
         
         # Match unique indices of this selection to the catalog indices
         idx = np.searchsorted(cat[OBJECT_ID],index)
-
+        import pdb; pdb.set_trace()
         # Set the unique keys
         i = best_values(sel,d['T_EFF']*d['EXPTIME'],labels,index)
         keys[UNIQUE_ID][i] = keys[OBJECT_ID][i]

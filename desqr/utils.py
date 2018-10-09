@@ -83,16 +83,24 @@ def which(program):
 
     return None
 
+def isstring(obj):
+    """Python 2/3 compatible string check"""
+    import six
+    return isinstance(obj, six.string_types)
+
 # Various utility functions
+def bfield(field,band):
+    """ Combine a single field and band. """
+    return ('%s_%s'%(field,band.strip())).upper()
 
 def bfields(fields,bands):
-    """ Create band-by-band fields"""
-    if isinstance(fields,basestring): fields = [fields]
-    if isinstance(bands,basestring): bands = [bands]
-    bands = np.char.upper(np.char.strip(bands))
-    out = [f+'_%s'%b for f,b in itertools.product(fields,bands)]
-    if len(out) == 1: return out[0]
-    else:             return out
+    """ Create band-by-band fields. """
+    if np.isscalar(fields) and np.isscalar(bands):
+        return bfield(fields,bands)
+    fields = np.atleast_1d(fields)
+    bands  = np.atleast_1d(bands)
+    out = [bfield(f,b) for f,b in itertools.product(fields,bands)]
+    return out
 
 def unique_pair(a,b):
     A = np.vstack([a,b]).T

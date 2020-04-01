@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=1,type=float)
     parser.add_argument('-n','--njobs',default=None,type=int)
-    parser.add_argument('-q','--queue',default='condor')
+    parser.add_argument('-q','--queue',default='vanilla')
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))
@@ -32,12 +32,9 @@ if __name__ == "__main__":
         outbase = 'hpx_%s'%band+'_%05d.fits'
         cmd = 'pixelize.py %s %s -o %s -n %i'%(indir,outdir,outbase,config['nside'])
 
-        if args.queue == 'local':
-            submit = cmd
-        else:
-            submit = 'csub -o %s '%(logfile)
-            if args.njobs: submit += '-n %s '%args.njobs
-            submit += cmd
+        submit = 'csub -q %s -o %s '%(args.queue, logfile)
+        if args.njobs: submit += '-n %s '%args.njobs
+        submit += cmd
         subprocess.call(submit,shell=True)
         time.sleep(args.sleep)
         #break

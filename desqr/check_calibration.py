@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+Checking and comparing photometric calibration zeropoints.
+"""
 import glob
 import os
 from os.path import join

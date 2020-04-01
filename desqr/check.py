@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+""" Check the integrety of pipeline processing. """
 import sys
 import os
 from os.path import join, basename
@@ -21,6 +22,7 @@ FAIL = color('FAIL','red')
 BAD = color('BAD','red')
    
 def bad_values_str(values):
+    """ Pretty print bad values """
     opts = np.get_printoptions()
     np.set_printoptions(precision=4,threshold=25,edgeitems=4)
     ret = repr(values)
@@ -28,9 +30,7 @@ def bad_values_str(values):
     return ret
 
 def print_running(idx,total,indent=0,step=10):
-    """
-    'idx' is indexed starting from 1.
-    """
+    """ 'idx' is 1-indexed. """
     i = idx
     idt = indent*' '
     if i == 1 or i % step == 0 or i == total: 
@@ -108,6 +108,7 @@ def check_files(explist,files):
     else: print OK
 
 def count_objects(args):
+    """ Count the number of objects """
     global counter
     with counter.get_lock(): counter.value += 1
 
@@ -157,18 +158,22 @@ def check_columns(args,columns=None,select=None,msg=None):
     return False
 
 def check_ra(args):
+    """ Check that RAs are in the allowed range """
     kwargs = dict(columns='RA', select=lambda x: (x<0) | (x>360))
     return check_columns(args,**kwargs)
 
 def check_flux(args):
+    """ Check that fluxes are in the allowed range """
     kwargs = dict(columns='FLUX_AUTO', select=lambda x: (x<0) | (x>1e9))
     return check_columns(args,**kwargs)
 
 def check_ccdnum(args):
+    """ Check that CCDNUM in the allowed range """
     kwargs = dict(columns='CCDNUM', select=lambda x: (x<1) | (x>62))
     return check_columns(args,**kwargs)
 
 def check_zeropoint(args):
+    """ Check that zeropoints in the allowed range """
     def select(x):
         olderr = np.seterr(invalid='ignore')
         sel = (~np.isfinite(x)) | (x < 5)
@@ -179,6 +184,7 @@ def check_zeropoint(args):
     return check_columns(args,**kwargs)
 
 def check_magnitude(args):
+    """ Check for bad magnitudes """
     def select(x):
         olderr = np.seterr(invalid='ignore')
         sel = (~np.isfinite(x)) | (x < 5) 
@@ -189,10 +195,12 @@ def check_magnitude(args):
     return check_columns(args,**kwargs)
 
 def check_objid(args):
+    """ Check object ids """
     kwargs = dict(columns=OBJECT_ID,select=lambda x: (~np.isfinite(x)) | (x < 0))
     return check_columns(args,**kwargs)
 
 def check_match(args):
+    """ Check match fraction """
     def select(x):
         nobjs = float(len(x))
         frac = (x > 0).sum()/nobjs
@@ -206,6 +214,7 @@ def check_match(args):
     return check_columns(args,**kwargs)
 
 def check_nan(args):
+    """ Check columns for nan values """
     kwargs = dict(select = lambda x: bool(np.any(np.isnan(x.view('>f4')))) )
 
     kwargs.update(columns=bfields(['WAVG_MAGRMS_AUTO','WAVG_MAGRMS_PSF'],BANDS),
@@ -218,7 +227,7 @@ def check_nan(args):
 
     return ret
 
-def check_header_keys(args)
+def check_header_keys(args):
     global counter
     with counter.get_lock(): counter.value += 1
     keys = np.atleast_1d(['RA','DEC'])
@@ -232,8 +241,7 @@ def check_header_keys(args)
 
 if __name__ == "__main__":
     import argparse
-    description = "python script"
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('config')
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-b','--band',dest='bands',default=None,

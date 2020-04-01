@@ -21,10 +21,14 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=1,type=float)
+    parser.add_argument('-f','--force',action='store_true',
+                        help='force resubmission')
+    parser.add_argument('-s','--sleep',default=1,type=float,
+                        help='sleep between jobs')
+    parser.add_argument('-m','--mlimit',default=40,type=float,
+                        help='memory limit (GB)')
     parser.add_argument('-n','--njobs',default=15,type=int)
-    parser.add_argument('-q','--queue',default='condor')
+    parser.add_argument('-q','--queue',default='vanilla')
     parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
@@ -33,7 +37,8 @@ if __name__ == "__main__":
     logdir = mkdir(os.path.join(hpxdir,'log'))
     radius = config['radius']
     force = '-f' if args.force else ''
-    
+    mlimit = '-m %s'%args.mlimit if args.mlimit else ''
+
     if args.pix: pixels = args.pix
     else: pixels = np.arange(healpy.nside2npix(config['nside']))
         
@@ -55,11 +60,8 @@ if __name__ == "__main__":
 
         logfile = os.path.join(logdir,'hpx_%05d.log'%pix)
 
-        params=(radius,' '.join(infiles),force)
-        cmd = 'match.py -r %s %s %s'%params
-        if args.queue == 'local':
-            submit = cmd
-        else:
-            submit = 'csub -o %s -n %s %s'%(logfile,args.njobs,cmd)
+        params=(radius,' '.join(infiles),force,mlimit)
+        cmd = 'match.py -r %s %s %s %s'%params
+        submit = 'csub -q %s -o %s -n %s %s'%(args.queue,logfile,args.njobs,cmd)
         subprocess.call(submit,shell=True)
         if args.queue != 'local': time.sleep(args.sleep)

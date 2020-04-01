@@ -22,15 +22,35 @@ from const import BANDS, TAGS
 #bliss_temp = '/export/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 bliss_des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 bliss_des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
+bliss_des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 
 outtemp = '%(unitname)s_%(band)s.fits'
 
 DTYPES = [('FILENAME', 'S48'), ('PFW_ATTEMPT_ID', '>i8'), ('TAG', 'S13'), ('UNITNAME', 'S9'), ('REQNUM', '>i4'), ('ATTNUM', '>i2'), ('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('FLAGS', '>i2'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'),('IMAFLAGS_ISO','>i2'),('MJD_OBS','>f8'),('EXPTIME','>f4')]
+TAG = ''
 
 def get_dirname(expnum):
+    """ Get base directory name """
     return expnum//100 * 100
 
-def bliss_selection(data):
+def get_filenames(expnum):
+    """ Get list of filenames """
+    dirname = get_dirname(expnum)
+    params = dict(expnum=expnum,dirname=dirname)
+    
+    for path in [bliss_des50,bliss_des60,bliss_des61]:
+        filenames = glob.glob(path.format(**params))
+        if filenames: break
+
+    if not filenames:
+        msg = "File not found for: " + str(params)
+        msg += '\n'+bliss_des50.format(**params)
+        msg += '\n'+bliss_des60.format(**params)
+        msg += '\n'+bliss_des61.format(**params)
+        raise IOError(msg)
+    return filenames
+    
+def bliss_select(data):
     sel = data['FLUX_PSF'] > 0
     sel &= data['FLUX_AUTO'] > 0
     sel &= data['FLAGS'] < 4
@@ -40,38 +60,47 @@ def bliss_selection(data):
     np.seterr(**olderr)
     return sel
 
-maglites_selection = bliss_selection
+maglites_select = bliss_select
+delve_select = bliss_select
     
-def create_output(data,exp):
-    out = np.recarray(len(data),dtype=DTYPES)
+def create_output(data,exp,dtype=DTYPES):
+    out = np.recarray(len(data),dtype=dtype)
     for n in out.dtype.names:
         if n not in exp.dtype.names + data.dtype.names:
             msg = "Column not found: %s"%n
             raise Exception(msg)
 
-        if n in exp.dtype.names:
-            out[n] = exp[n]
-
+        # This has defaults set
         if n in data.dtype.names:
             out[n] = data[n]
 
+        # Fill some columns from exp
+        if n in ['PFW_ATTEMPT_ID','TAG','UNITNAME','REQNUM','ATTNUM','T_EFF','TAG']:
+            out[n] = exp[n]
+
     return out
 
-def create_catalog(filename):
+def create_catalog(filename,dtype=DTYPES,tag=TAG):
     fits = fitsio.FITS(filename)
 
     hdr = create_header(fits)
     data = fits['LDAC_OBJECTS'].read()
 
-    cat = np.recarray(len(data),dtype=DTYPES)
+    cat = np.recarray(len(data),dtype=dtype)
 
-    for name,dtype in DTYPES:
+    for name,dt in dtype:
+        if '_APER_' in name:
+            prefix,idx = name.rsplit('_',1)
+            cat[name] = data[prefix][:,int(idx)]
+            continue
+
         if name not in data.dtype.names: continue
         cat[name] = data[name]
+
             
     cat['FILENAME'] = os.path.basename(filename)
     cat['PFW_ATTEMPT_ID'] = int(str(hdr['EXPNUM'])+'01')
-    cat['TAG'] = TAG
+    cat['TAG'] = tag 
     cat['UNITNAME'] = 'D%08d'%hdr['EXPNUM']
     cat['REQNUM'] = 1
     cat['ATTNUM'] = 1
@@ -96,6 +125,35 @@ def create_header(fits):
     hdrstr = '\n'.join(fits['LDAC_IMHEAD'].read()[0][0])
     return Header.fromstring(hdrstr,sep='\n')
 
+
+def create_downskim(filenames, select, exp, dtype=DTYPES, tag=TAG):
+    """ Create a downskimmed catalog from filenames 
+
+    Parameters
+    ----------
+    filenames : list of filenames
+    select : selection function
+    exp : exposure info
+
+    Returns
+    -------
+    catalog
+    """
+    data = []
+    for f in filenames:
+        try: 
+            data += [create_catalog(f,dtype,tag)]
+        except IOError as e:
+            # Sometimes the processing has failed for a specific file
+            logging.warn(str(e))
+
+    data = np.hstack(data)
+
+    sel = select(data)
+    output = create_output(data[sel],exp,dtype)
+
+    return output
+    
 def downskim(outfile,select,exp,force):
     """ Like download, but for skimming catalog files.
     """
@@ -104,25 +162,8 @@ def downskim(outfile,select,exp,force):
         return
 
     expnum = exp['EXPNUM']
-    dirname = get_dirname(expnum)
-    params = dict(expnum=expnum,dirname=dirname)
-    
-    filenames = glob.glob(bliss_des50.format(**params))
-    if not filenames:
-        filenames = glob.glob(bliss_des60.format(**params))
-    if not filenames:
-        msg = "File not found for: " + str(params)
-        msg += '\n'+bliss_des50.format(**params)
-        msg += '\n'+bliss_des60.format(**params)
-        raise IOError(msg)
-
-    data = []
-    for f in filenames:
-        data += [create_catalog(f)]
-    data = np.hstack(data)
-
-    sel = select(data)
-    output = create_output(data[sel],exp)
+    filenames = get_filenames(expnum)
+    output = create_downskim(filenames,select,exp,DTYPES,TAG)
 
     logging.info("Writing %s..."%outfile)
     fitsio.write(outfile,output)
@@ -141,7 +182,7 @@ if __name__ == "__main__":
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.getLogger().setLevel(level)
 
-    explist = pd.read_csv(args.explist).to_records()
+    explist = pd.read_csv(args.explist,encoding='ascii').to_records()
     explist.dtype.names = map(str.upper,explist.dtype.names)
     exp = explist[explist['EXPNUM'] == args.expnum]
 
@@ -155,10 +196,12 @@ if __name__ == "__main__":
     exp = exp[0]
 
     TAG = args.tag
-    if args.tag == 'BLISS':
-        select = bliss_selection
-    elif 'MAGLITES' in args.tag :
-        select = maglites_selection
+    if TAG.startswith('BLISS'):
+        select = bliss_select
+    elif TAG.startswith('MAGLITES'):
+        select = maglites_select
+    elif TAG.startswith("DELVE"):
+        select = delve_select
     else:
         raise Exception('Tag not found: %s'%args.tag)
 

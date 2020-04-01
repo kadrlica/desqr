@@ -3,6 +3,8 @@ import os
 import subprocess
 import tempfile
 
+import numpy as np
+
 from utils import ccdnum
 from const import BANDS, TAGS
 
@@ -441,21 +443,21 @@ e.expnum = q.expnum
 and e.propid != '2012B-0001' and e.propid not like '*-9999'
 and e.band in ('g','r','i','z') 
 and e.radeg is not NULL and e.decdeg is not NULL
-and q.t_eff > 0.1 and q.t_eff * e.exptime > 30
-order by e.expnum"""
+and q.t_eff > 0.1 and e.exptime >= 30
+ORDER BY e.expnum;"""
     else:
         query = """select e.expnum||'01' as PFW_ATTEMPT_ID, e.expnum,
 'D00'||e.expnum as unitname,
 1 as reqnum, 1 as attnum, e.radeg as telra, e.decdeg as teldec, 
-e.nite, e.band, q.t_eff, 0 as flag, 'BLISS' as tag 
+e.nite, e.band, q.t_eff, 0 as flag, '%(tag)s' as tag 
 from exposure e, qa_summary q, proctag t where 
 e.expnum = q.expnum and e.expnum = t.expnum
 and t.tag = '%(tag)s'
 and e.propid != '2012B-0001' and e.propid not like '*-9999'
 and e.band in ('g','r','i','z') 
 and e.radeg is not NULL and e.decdeg is not NULL
-and q.t_eff > 0.1 and q.t_eff * e.exptime > 30
-order by e.expnum"""%dict(tag=tag)
+and q.t_eff > 0.1 and e.exptime >= 30
+ORDER BY e.expnum;"""%dict(tag=tag)
         
     return query
 
@@ -492,7 +494,7 @@ z.RA_CENT as RA, z.DEC_CENT as DEC,
 z.FGCM_ZPT as MAG_ZERO, z.FGCM_ZPTERR as SIGMA_MAG_ZERO,
 z.FGCM_FLAG as ZP_FLAG
 from erykoff.Y3A1_FGCM_Y1Y2Y3_V1_0@dessci z
-order by expnum, ccdnum;"""
+ORDER BY expnum, ccdnum;"""
     return query
 
 def y3a1_fgcm_zeropoint_query():
@@ -502,7 +504,7 @@ z.RA_CENT as RA, z.DEC_CENT as DEC,
 z.FGCM_ZPT as MAG_ZERO, z.FGCM_ZPTERR as SIGMA_MAG_ZERO,
 z.FGCM_FLAG, (CASE WHEN z.FGCM_FLAG < 16 THEN 0 ELSE 1 END) as ZP_FLAG
 from erykoff.Y3A1_FGCM_ALL_V2_5@dessci z
-order by expnum, ccdnum;
+ORDER BY expnum, ccdnum;
 """
     return query
 
@@ -523,14 +525,14 @@ select EXPNUM_1 as EXPNUM, CCDNUM_1 as CCDNUM, BAND,
 RA_CENT as RA, DEC_CENT as DEC,
 MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
 from dtucker.MAGLITES_PSM_ZPS_EBV@DESSCI
-order by EXPNUM, CCDNUM;
+ORDER BY EXPNUM, CCDNUM;
 """
     elif tag is None:
         query = """-- Zeropoints for maglites
 select EXPNUM, CCDNUM, BAND, RA_CENT as RA, DEC_CENT as DEC,
 MAG_ZERO, STD_MAG_ZERO, 0 as ZP_FLAG
 from DTUCKER.MAGLITES_APASS_DES_ZPS_EBV@DESSCI
-order by EXPNUM, CCDNUM;
+ORDER BY EXPNUM, CCDNUM;
 """
     elif tag == 'MAGLITES_R4':
         query = """-- Zeropoint query for ostgres database
@@ -542,7 +544,7 @@ from zeropoint z, exposure e, image i
 where e.expnum = i.expnum and i.expnum = z.expnum and i.ccdnum = z.ccdnum
 and z.band in ('g','r') and e.propid = '2016A-0366'
 and e.exptime > 59 and e.obstype = 'object'
-order by z.EXPNUM, z.CCDNUM
+ORDER BY z.EXPNUM, z.CCDNUM
 """
     return query
 
@@ -550,19 +552,30 @@ def desdm_blacklist():
     query = """-- Blacklisted CCDs from official DESDM table
 select EXPNUM, CCDNUM
 from prod.BLACKLIST@DESOPER
-order by EXPNUM, CCDNUM;
+ORDER BY EXPNUM, CCDNUM;
 """
     return query
 
-def bliss_zeropoint_query():
+def bliss_zeropoint_query(tag=None):
     # postgres
-    query = """-- Zeropoint query for bliss on the postgres database
+    if tag is None:
+        query = """-- Zeropoint query for bliss on the postgres database
 select EXPNUM, CCDNUM, BAND, MAG_ZERO, SIGMA_MAG_ZERO, FLAG as EXPCALIB_FLAG, 
 CASE WHEN FLAG < 0 THEN 1 ELSE 0 END as ZP_FLAG
 from zeropoint 
 where band in ('g','r','i','z')
-order by EXPNUM, CCDNUM
+ORDER BY EXPNUM, CCDNUM
 """
+    else:
+        query = """-- Zeropoint query for bliss on the postgres database
+select EXPNUM, CCDNUM, BAND, MAG_ZERO, SIGMA_MAG_ZERO, FLAG as EXPCALIB_FLAG, 
+CASE WHEN FLAG < 0 THEN 1 ELSE 0 END as ZP_FLAG
+from zeropoint z, proctag t
+where band in ('g','r','i','z')
+and t.tag = '%(tag)s' and t.expnum = z.expnum
+ORDER BY EXPNUM, CCDNUM
+"""%dict(tag=tag)
+        
     return query
 
 def zeropoint_query(tags=None):
@@ -573,7 +586,7 @@ def zeropoint_query(tags=None):
         return maglites_zeropoint_query()
     if 'MAGLITES_R4' in tags:
         return maglites_zeropoint_query(tag='MAGLITES_R4')
-    if 'BLISS' in tags:
+    if np.any([t.startswith('BLISS') for t in tags]):
         return bliss_zeropoint_query()
 
 def exposure_query(tags=None,program='survey'):
@@ -597,6 +610,8 @@ def exposure_query(tags=None,program='survey'):
         queries.append(finalcut_exposure_query(program,tag='Y2A1_FINALCUT'))
     if 'BLISS_Y17T2' in tags:
         queries.append(bliss_exposure_query(tag='BLISS_Y17T2'))
+    if 'BLISS_Y18T1' in tags:
+        queries.append(bliss_exposure_query(tag='BLISS_Y18T1'))
 
     if not queries:
         msg = 'Unrecognized tag: %s'%tags

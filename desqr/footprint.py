@@ -53,19 +53,20 @@ def count(filename):
     return ret
 
 sel_g     = lambda x: select(x,'WAVG_MAG_PSF_G')
-sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R') 
-sel_i     = lambda x: select(x,'WAVG_MAG_PSF_I') 
-sel_z     = lambda x: select(x,'WAVG_MAG_PSF_Z') 
-sel_Y     = lambda x: select(x,'WAVG_MAG_PSF_Y') 
+sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R')
+sel_i     = lambda x: select(x,'WAVG_MAG_PSF_I')
+sel_z     = lambda x: select(x,'WAVG_MAG_PSF_Z')
+sel_Y     = lambda x: select(x,'WAVG_MAG_PSF_Y')
 sel_any   = lambda x: np.ones(len(x),dtype=bool)
 sel_gr    = lambda x: sel_g(x) & sel_r(x)
+sel_gi    = lambda x: sel_g(x) & sel_i(x)
 sel_iz    = lambda x: sel_i(x) & sel_z(x)
 sel_griz  = lambda x: sel_g(x) & sel_r(x) & sel_i(x) & sel_z(x)
 sel_grizY = lambda x: sel_g(x) & sel_r(x) & sel_i(x) & sel_z(x) & sel_Y(x)
 sel_all   = sel_grizY
-sel_g     = lambda x: select(x,'WAVG_MAG_PSF_G',22.0)
-sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R',22.0) 
-sel_gr    = lambda x: sel_g(x) & sel_r(x)
+#sel_g     = lambda x: select(x,'WAVG_MAG_PSF_G',22.0)
+#sel_r     = lambda x: select(x,'WAVG_MAG_PSF_R',22.0) 
+#sel_gr    = lambda x: sel_g(x) & sel_r(x)
 #sel_i     = lambda x: select(x,'WAVG_MAG_PSF_I',21.0) 
 #sel_z     = lambda x: select(x,'WAVG_MAG_PSF_Z',21.0) 
 #sel_Y     = lambda x: select(x,'WAVG_MAG_PSF_Y',21.0) 
@@ -78,6 +79,7 @@ SELECT = odict([
     ['z'   ,sel_z    ],
     ['Y'   ,sel_Y   ],
     ['gr'  ,sel_gr  ],
+    ['gi'  ,sel_gi  ],
     ['iz'  ,sel_iz  ],
     ['griz' ,sel_griz ],
     ['grizY' ,sel_grizY ],
@@ -102,6 +104,7 @@ if __name__ == "__main__":
     bands = config['bands']
     if not args.band: 
         args.band = ['any'] + bands + [''.join(bands)]
+    catdir = config['catdir']
 
     COLUMNS = create_columns(bands)
     skymaps = []
@@ -109,7 +112,7 @@ if __name__ == "__main__":
         print("Adding %s-band selection..."%k)
         skymaps.append([k,SELECT[k],empty(nside)])
 
-    infiles = sorted(glob.glob('cat/cat_hpx_*.fits'))
+    infiles = sorted(glob.glob(catdir+'/cat_hpx_*.fits'))
     for f in infiles:
         if args.verbose: print f
         data = fitsio.read(f,columns=COLUMNS)
@@ -153,6 +156,7 @@ if __name__ == "__main__":
         else:
             smap = SurveySkymap()
             #im = plotting.draw_footprint(skymap,cmap='viridis')
+
             
         im,_lon,_lat,_val = smap.draw_hpxmap(skymap,cmap='viridis')
         plt.colorbar(im,label=r'$\log_{10}({\rm Density}\ [\deg^{-2}])$')
@@ -163,8 +167,10 @@ if __name__ == "__main__":
         out['map'] = os.path.basename(outfile)
         outfile = join(plotdir,'footprint_%s_n%i_equ.fits.gz'%(name,nside))
         print "Writing %s..."%outfile
+        if os.path.exists(outfile): os.remove(outfile)
         healpy.write_map(outfile,counts,dtype=int)
         outstr += template%out
+        import pdb; pdb.set_trace()
     print outstr
 
     kwargs = dict(bins=np.linspace(1,100,100),histtype='step',lw=1.5)

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from collections import OrderedDict as odict
 import logging
+import gc
 
 import healpy
 from scipy.spatial import cKDTree
@@ -68,7 +69,7 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01):
     --------
     idx1 : index into the first array
     idx2 : index into the second array
-    ds   : angular separtion (deg)
+    ds   : angular seperation (deg)
     """
     coords1 = projector(lon1,lat1)
     coords2 = projector(lon2,lat2)
@@ -98,7 +99,8 @@ def match_ball_tree(lon,lat,radius=1.0):
     logger.info("Querying ball tree with radius %s arcsec..."%radius)
     idx = tree.query_ball_tree(tree,dist,eps=0.01)
     del tree, coords
-     
+    gc.collect()
+
     # This could probably be improved...
     logger.info("Filling matched IDs.")
     match_id = -1*np.ones(nobjs,dtype=int)
@@ -281,6 +283,8 @@ if __name__ == "__main__":
     parser.add_argument('infiles',nargs='+')
     parser.add_argument('-r','--radius',default=1.0,type=float,
                         help='matching radius')
+    parser.add_argument('-m','--mlimit',default=None,type=float,
+                        help='memory limit (GB)')
     parser.add_argument('-o','--objid',default=OBJECT_ID,
                         help='name of output object identifier')
     parser.add_argument('-f','--force',action='store_true',
@@ -290,6 +294,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.verbose: logger.setLevel(logging.DEBUG)
+    
+    if args.mlimit: 
+        logger.info("Setting memory limit: %.1fGB"%(args.mlimit))
+        soft,hard = utils.set_memory_limit(args.mlimit*1024**3)
+        logger.info("Memory limit: %.1fGB"%(soft/1024.**3))
 
     logger.info("Matching files: %s"%args.infiles)
     radius = args.radius

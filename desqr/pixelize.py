@@ -16,6 +16,8 @@ HPXBASE = 'hpx_%05d.fits'
 
 # Alternative RA,DEC names
 ALT_RADEC_COLUMNS = [
+    ['RA','DEC'],
+    ['RA','Dec'],
     ['ALPHAWIN_J2000','DELTAWIN_J2000'],
     ]
 
@@ -31,7 +33,23 @@ def ang2pix(nside, lon, lat, nest=False):
     phi = np.radians(lon)
     return healpy.ang2pix(nside, theta, phi, nest)
 
-def readfile(filename):
+def read_csv_float32(filename):
+    """
+    Read a csv file at 32bit precision (excluding ra/dec columns
+
+    Adapted from: https://stackoverflow.com/a/30495210/4075339
+    """
+    # Sample 100 rows of data to determine dtypes.
+    df_test = pd.read_csv(filename, nrows=100, encoding='ascii')
+     
+    float_cols = np.array([c for c in df_test if df_test[c].dtype == "float64"])
+    exclude = [name for pair in ALT_RADEC_COLUMNS for name in pair]
+    float_cols = float_cols[~np.in1d(float_cols,exclude)]
+    float32_cols = {c: np.float32 for c in float_cols}
+
+    return pd.read_csv(filename,encoding='ascii',engine='c',dtype=float32_cols).to_records(index=False)
+
+def readfile(filename,float32=False):
     """
     Abstract file reading to deal with raw catalog files.
     """
@@ -49,9 +67,12 @@ def readfile(filename):
         f.close()
     elif np.char.endswith(filename, ['.csv','.csv.gz']).sum():
         # This is not perfect, but hey, it works...
-        data = pd.read_csv(filename,encoding='ascii').to_records(index=False)
+        if float32:
+            data = read_csv_float32(filename)
+        else:
+            data = pd.read_csv(filename,encoding='ascii').to_records(index=False)
         dtype = [(str(n).upper(),d if d!=OBJ else STR) for n,d in data.dtype.descr]
-        data = data.astype(dtype) # not efficient...
+        data = data.astype(dtype) # not efficient...see float32 idea above
         nrows = len(data)
         logger.info("%i objects found"%nrows)
         if not nrows: 
@@ -71,7 +92,8 @@ def readfile(filename):
 
     return data
 
-def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=False):
+def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=False,
+             float32=False):
     """
     Break catalog up into a set of healpix files.
     """
@@ -88,15 +110,8 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
 
     for ii,infile in enumerate(infiles):
         logger.info('(%i/%i) %s'%(ii+1, len(infiles), infile))
-        data = readfile(infile)
+        data = readfile(infile,float32)
         if data is None: continue
-
-        #f = fitsio.FITS(infile,'r')
-        #nrows = f[1].get_nrows()
-        #logger.info("%i objects found"%nrows)
-        #if not nrows: continue
-        #data = f[1].read()
-        #f.close()
 
         catalog_pix = ang2pix(nside,data['RA'],data['DEC'])
         #### Add object pixel (hack to get correct byte order)
@@ -147,6 +162,8 @@ if __name__ == "__main__":
                         help='output file basename')
     parser.add_argument('-n','--nside',default=16,type=int,
                         help='output nside')
+    parser.add_argument('--float32',action='store_true',
+                        help='convert columns to float32 (excludes RA,DEC)')
     parser.add_argument('-f','--force',action='store_true',
                         help='overwrite existing files')
     parser.add_argument('-v','--verbose',action='store_true',
@@ -162,4 +179,5 @@ if __name__ == "__main__":
         infiles = sorted(glob.glob(args.indir+'/*'+ext))
         if infiles: break
 
-    pixelize(infiles,args.outdir,args.outbase,nside=args.nside,force=args.force)
+    pixelize(infiles,args.outdir,args.outbase,nside=args.nside,
+             force=args.force,float32=args.float32)

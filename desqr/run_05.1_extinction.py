@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Apply zeropoints and extinction correction to catalog files.
+Apply extinction correction to catalog files.
 """
 import os
 from os.path import basename
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=1,type=float)
     parser.add_argument('-n','--njobs',default=10,type=int)
-    parser.add_argument('-q','--queue',default='condor')
+    parser.add_argument('-q','--queue',default='vanilla')
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))
@@ -46,10 +46,6 @@ if __name__ == "__main__":
 
         cmd = "extinction.py %(force)s %(extinction)s %(bands)s %(infile)s"%params
 
-        if args.queue == 'local':
-            print cmd
-            submit = cmd
-        else:
-            submit = 'csub -o %s -n %s "%s"'%(logfile,args.njobs,cmd)
+        submit = 'csub -o %s -n %s -q %s "%s"'%(logfile,args.njobs,args.queue,cmd)
         subprocess.call(submit,shell=True)
         time.sleep(args.sleep)

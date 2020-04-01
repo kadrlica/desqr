@@ -424,13 +424,23 @@ def get_vizier_catalog(ra,dec,radius=None,**kwargs):
     warnings.resetwarnings()
     return tab[0]
 
-if __name__ == "__main__":
-    import argparse
-    description = "python script"
-    parser = argparse.ArgumentParser(description=description)
-    opts = parser.parse_args()
-
 
 def print_problem(msg):
     import termcolor as color
     print color(msg,'red')
+
+def set_memory_limit(mlimit):
+    """Set the (soft) memory limit for setrlimit.
+
+    Parameters:
+    -----------
+    mlimit : soft memory limit (bytes)
+                                                                                 
+    Returns:
+    --------
+    soft, hard : memory limits (bytes)
+    """
+    import resource
+    rsrc = resource.RLIMIT_AS
+    resource.setrlimit(rsrc, (mlimit, mlimit))
+    return resource.getrlimit(rsrc)

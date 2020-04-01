@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-s','--sleep',default=2,type=float)
     parser.add_argument('-q','--queue',default='local')
-    parser.add_argument('--section',action='append',choices=SECTIONS)
+    parser.add_argument('-r','--run',action='append',choices=SECTIONS)
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-n','--nside',default=None,type=int)
     parser.add_argument('-b','--band',default=None,action='append')
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     force = '-f' if args.force else ''
 
     config = yaml.load(open(args.config))
-    sections = args.section if args.section else SECTIONS
+    sections = args.run if args.run else SECTIONS
     path = os.path.dirname(os.path.abspath(__file__))
 
     if 'footprint' in sections:
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     if 'depth' in sections:
         nside = 1024 if args.nside is None else args.nside
         exe = os.path.join(path,'depth.py')
-        cmd = 'python -n %i %s'%(args.nside,exe)
+        cmd = 'python %s -n %i'%(exe,nside)
         if args.verbose: cmd += ' -v'
 
         if args.queue == 'local':

@@ -6,6 +6,8 @@ import os,shutil
 from os.path import splitext
 import glob
 from collections import OrderedDict as odict
+import logging
+
 import numpy as np
 np.seterr(divide='ignore')
 import fitsio
@@ -124,7 +126,10 @@ def zeropoint(data,zp):
     out.fill(BADMAG)
     out['ZP_FLAG'].fill(BADZP)
 
-    for expnum in np.unique(data['EXPNUM']):
+    expnums = np.unique(data['EXPNUM'])    
+    logger.info("Applying zeropoints to %i exposures..."%len(expnums))
+
+    for expnum in expnums:
         zidx = np.where(zp['EXPNUM'] == expnum)[0]
         if zidx.sum() == 0:
             logger.debug("No zeropoint for exposure: %i"%expnum)
@@ -160,13 +165,16 @@ if __name__ == "__main__":
     parser.add_argument('zpfile')
     parser.add_argument('-b','--blacklist',default=None,action='append')
     parser.add_argument('-f','--force',action='store_true')
-
+    parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()
+
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.getLogger().setLevel(level)
 
     logger.info("Reading %s..."%args.infile)
     data = fitsio.read(args.infile,ext=1,columns=DATACOLS)
     zp = read_zeropoint(args.zpfile,args.blacklist)
-    logger.info("Applying zeropoints %s..."%args.zpfile)
+    logger.info("Applying zeropoints from %s..."%args.zpfile)
     out = zeropoint(data,zp)
 
     # Writing...

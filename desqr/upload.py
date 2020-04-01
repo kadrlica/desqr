@@ -21,8 +21,9 @@ if __name__ == "__main__":
     parser.add_argument('-s','--section',default='desoper')
     args = parser.parse_args()
     
-    ea.set_color_term(False)
+    #ea.set_color_term(False)
     con = ea.connect(section=args.section,quiet=True)
+    con.ct = False
     cur = con.cursor()
 
     msg = "easyaccess v%s"%ea.__version__

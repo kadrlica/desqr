@@ -74,6 +74,17 @@ Y3A1 = odict([
         ('y',1.052),
         ])
 
+# R_lambda values for DES DR1 from:
+# https://arxiv.org/abs/1801.03181
+DR1 = odict([
+        ('g',3.186),
+        ('r',2.140),
+        ('i',1.569),
+        ('z',1.196),
+        ('Y',1.048),
+        ('y',1.048),
+        ])
+
 # From Table 6 in Schlafly 2011 with Rv = 3.1
 # http://iopscience.iop.org/article/10.1088/0004-637X/737/2/103/pdf
 PS1 = odict([
@@ -182,7 +193,7 @@ if __name__ == "__main__":
                         help='bands to calculate extinction')
     parser.add_argument('--ext',default='EXTINCTION',
                         help='name of extinction output column')
-    parser.add_argument('--coeff',default='Y3A1',choices=['Y3A1','PS1','DESDM'],
+    parser.add_argument('--coeff',default='DR1',choices=['Y3A1','PS1','DESDM','DR1'],
                         help='reddening coefficients')
     parser.add_argument('-f','--force',action='store_true',
                         help='overwrite output columns if they exist')
@@ -199,6 +210,8 @@ if __name__ == "__main__":
         COEFF = DESDM
     elif args.coeff == 'PS1':
         COEFF = PS1
+    elif args.coeff == 'DR1':
+        COEFF = DR1
     else:
         raise Exception('Unrecognized coefficient set: %s'%args.coeff)
     logger.info("Using %s coefficients."%args.coeff)

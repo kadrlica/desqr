@@ -26,17 +26,33 @@ import utils
 
 from ugali.utils.healpix import ang2disc
 
-DTYPES = downskim.DTYPES + [('FLUX_APER_08', '>f4'), ('FLUXERR_APER_08', '>f4')]
+UID     = 'FILENAME'
+FLUX    = 'FLUX_APER_08'
+FLUXERR = 'FLUXERR_APER_08'
+DTYPES = downskim.DTYPES + [(FLUX, '>f4'), (FLUXERR, '>f4')]
 REFCAT_COLUMNS = ['OBJID','RA','DEC','G','DG','R','DR','I','DI','Z','DZ']
 
 def derive_zeropoints(dataFrame, band):
-    """ Modification of Douglas' DELVE_tie_to_stds """
+    """ Modification of Douglas' DELVE_tie_to_stds 
+
+    Parameters
+    ----------
+
+    dataFrame : pandas DataFrame of matched, merged objects containing
+                observed measurements and reference catalog measurements
+    band      : band to perform calibration on
+    """
+    #NOTE: This function could be modified to use the dataFrame['BAND']
+    #information to deterime the reference magnitude for each
+    #object. Not really necessary for single-exposure calibration, but
+    #would remove the restriction on specifying `band` at input.
+
     logging.info("Starting to derive zeropoints...")
     logging.debug(datetime.datetime.now())
 
-    aggFieldColName   = 'FILENAME'
-    fluxObsColName    = 'FLUX_APER_08'
-    fluxerrObsColName = 'FLUXERR_APER_08'
+    aggFieldColName   = UID
+    fluxObsColName    = FLUX
+    fluxerrObsColName = FLUXERR
 
     # Transform ATLAS-REFCAT2 mags into DES mags for this filter band...
     if band is 'g':
@@ -148,16 +164,16 @@ def derive_zeropoints(dataFrame, band):
 
     # Perform pandas grouping/aggregating functions on sigma-clipped Data Frame...
     logging.info('Performing grouping/aggregating...')
-    logging.debug(datetime.datetime.now())
+    logging.debug("pre stats: "+str(datetime.datetime.now()))
     # These are unique columns
-    columns = [aggFieldColName,'EXPNUM','CCDNUM','EXPTIME','T_EFF']
+    columns = [aggFieldColName,'EXPNUM','CCDNUM','BAND','EXPTIME','T_EFF']
     groupedDataFrame = df.groupby(columns)
     magZeroMedian = groupedDataFrame['MAG_DIFF'].median()
     magZeroMean = groupedDataFrame['MAG_DIFF'].mean()
     magZeroStd = groupedDataFrame['MAG_DIFF'].std()
-    magZeroNum = groupedDataFrame['MAG_DIFF'].count()
-    magZeroErr = magZeroStd/np.sqrt(magZeroNum-1)
-    logging.debug(str(datetime.datetime.now()) + '\n')
+    magZeroNum = groupedDataFrame['MAG_DIFF'].count().astype(np.int32)
+    magZeroErr = (magZeroStd/np.sqrt(magZeroNum-1)).astype(np.float32)
+    logging.debug("post stats: "+str(datetime.datetime.now()))
 
     # Rename these pandas series...
     magZeroMedian.name = 'MAG_ZERO_MEDIAN'
@@ -166,31 +182,16 @@ def derive_zeropoints(dataFrame, band):
     magZeroNum.name    = 'MAG_ZERO_NUM'
     magZeroErr.name    = 'MAG_ZERO_MEAN_ERR'
 
-    ## Also, calculate group medians for all columns in df that have a numerical data type...
-    ## ADW: Not sure how useful this is
-    #numericalColList = df.select_dtypes(include=[np.number]).columns.tolist()
-    #groupedDataMedian = {}
-    #for numericalCol in numericalColList:
-    #    groupedDataMedian[numericalCol] = groupedDataFrame[numericalCol].median()
-    #    groupedDataMedian[numericalCol].name = "%s_MEDIAN"%numericalCol
-
-    # Create new data frame containing all the relevant aggregate quantities
-    #newDataFrame = pd.concat( [magZeroMedian, magZeroMean, magZeroStd, \
-    #                           magZeroErr, magZeroNum], \
-    #                           join='outer', axis=1 )
     seriesList = []
-    #for numericalCol in numericalColList:
-    #    seriesList.append(groupedDataMedian[numericalCol])
     seriesList.extend([magZeroMedian, magZeroMean, magZeroStd, \
-                               magZeroErr, magZeroNum])
+                       magZeroErr, magZeroNum])
     newDataFrame = pd.concat(seriesList, join='outer', axis=1 )
 
     logging.debug(datetime.datetime.now())
     return newDataFrame
 
-def read_refcat(ra,dec,radius=2.0):
-    """ 
-    Read the reference catalog in a localized region.
+def read_refcat(ra,dec,radius=1.5):
+    """ Read the reference catalog in a localized region.
 
     Parameters
     ----------
@@ -212,47 +213,102 @@ def read_refcat(ra,dec,radius=2.0):
     refcat = utils.load_infiles(filenames,columns=columns)
     return refcat
 
+def merge_refcat(catalog,refcat,angsep=1.0):
+    """ Match and merge catalog and reference catalog.
+    Both catalogs must contain the columns `RA` and `DEC`.
+
+    Parameters
+    ----------
+    catalog : the observed catalog 
+    refcat  : the reference catalog
+    angsep  : the angular separation tolerence for matching (arcsec)
+
+    Returns
+    -------
+    df : matched, merged pandas DataFrame
+    """
+    # Find index of closest match to each refcat object
+    idx1,idx2,sep = match.match_query(refcat['RA'],refcat['DEC'],catalog['RA'],catalog['DEC'])
+
+    # Matching tolerance
+    angsep /= 3600. # (deg)
+    sel = (sep < angsep)
+
+    # Select sorted matched objects
+    df1 = pd.DataFrame(catalog[idx2[sel]].byteswap().newbyteorder())
+    df2 = pd.DataFrame(refcat[idx1[sel]].byteswap().newbyteorder())
+    df2.rename(columns={'RA':'RA_REF','DEC':'DEC_REF'},inplace=True)
+
+    # Return the merged data frame (note that columns will be duplicated)
+    return pd.concat([df1,df2],axis=1)
+
 def calibrate(outfile,select,exp,force):
+    """ The calibration driver function.
+
+    Parameters
+    ----------
+    outfile : output file name
+    select  : selection function for skimming observed catalog
+    exp     : exposure info
+    force   : force overwrite of output file
+
+    Returns
+    -------
+    zps     : zeropoints
+    """
+    if os.path.exists(outfile) and not force:
+        logging.warn('Found %s; skipping...'%outfile)
+        return
+
     expnum = exp['EXPNUM']
     filenames = downskim.get_filenames(expnum)
 
     logging.info("Reading object catalog...")
-    catalog = downskim.create_downskim(filenames,select,exp,dtype=DTYPES)
+    catalog = downskim.create_downskim(filenames,select,exp=exp,dtype=DTYPES)
     logging.info("  %s objects"%len(catalog))
 
     logging.info("Reading reference catalog...")
-    refcat = read_refcat(exp['TELRA'],exp['TELDEC'],2.0)
+    refang = 1.2 # config param: reference catalog angular selection (deg)
+    refcat = read_refcat(exp['TELRA'],exp['TELDEC'],refang)
     logging.info("  %s objects"%len(refcat))
 
     logging.info("Matching with reference catalog...")
-    idx1,idx2,sep = match.match_query(catalog['RA'],catalog['DEC'],refcat['RA'],refcat['DEC'])
-
-    # Matching tolerance
-    angsep = 2.0/3600.
-    sel = (sep < angsep)
-
-    df1 = pd.DataFrame(catalog[idx1[sel]].byteswap().newbyteorder())
-    df2 = pd.DataFrame(refcat[idx2[sel]].byteswap().newbyteorder())
-    df2.rename(columns={'RA':'RA_REF','DEC':'DEC_REF'},inplace=True)
-    dataFrame = pd.concat([df1,df2],axis=1)
+    angsep = 1.0 # config param: angular separation for matching (arcsec)
+    dataFrame = merge_refcat(catalog,refcat,angsep)
     logging.info("  %s objects"%len(dataFrame))
+
+    # For debugging...
+    if False:
+        fname = os.path.join(mkdir('match'),os.path.basename(outfile))
+        fname = fname.replace('.fits','.csv')
+        dataFrame.to_csv(fname, index=False)
 
     logging.info("Deriving zeropoints...")
     output = derive_zeropoints(dataFrame,exp['BAND'])
 
     logging.info("Writing %s..."%outfile)
-    output.to_csv(outfile, float_format='%.4f')
+    ext = os.path.splitext(outfile)[-1]
+
+    if ext in ('.fits','.fits.gz'):
+        fitsio.write(outfile, output.to_records() )
+    else:
+        output.to_csv(outfile, float_format='%.4f')
+
+    return output
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('explist')
-    parser.add_argument('outfile')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-e','--expnum',default=None,type=int)
-    parser.add_argument('-c','--ccdnum',default=None,type=int)
-    parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('-t','--tag',default='DELVE',choices=TAGS)
+    parser.add_argument('explist', help='exposure list')
+    parser.add_argument('outfile', help='output file')
+    parser.add_argument('-f','--force',action='store_true',
+                        help='force rerun')
+    parser.add_argument('-e','--expnum',default=None,type=int,
+                        help='exposure number')
+    parser.add_argument('-v','--verbose',action='store_true',
+                        help='verbose output')
+    parser.add_argument('-t','--tag',default='DELVE',choices=TAGS,
+                        help='data set tag')
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -261,25 +317,23 @@ if __name__ == "__main__":
     explist = pd.read_csv(args.explist).to_records(index=False)
     explist.dtype.names = [str(n).upper() for n in explist.dtype.names]
 
-    exp = explist[explist['EXPNUM'] == args.expnum]
-
-    if len(exp) == 0:
-        raise ValueError("EXPNUM not found: %s"%args.expnum)
-    elif len(exp) > 1:
-        msg = "Multiple values for EXPNUM found: %s"%args.expnum
-        for e in exp:
-            msg += ("\n"+e)
-        raise ValueError()
-    exp = exp[0]
-
     TAG = args.tag
     if TAG.startswith('BLISS'):
-        select = downskim.bliss_selection
+        select = downskim.bliss_select
     elif TAG.startswith('MAGLITES'):
-        select = downskim.maglites_selection
+        select = downskim.maglites_select
     elif TAG.startswith("DELVE"):
         select = downskim.delve_select
     else:
         raise Exception('Tag not found: %s'%args.tag)
 
-    calibrate(args.outfile,select,exp,args.force)
+    exp = explist[explist['EXPNUM'] == args.expnum]
+    if len(exp) == 0:
+        raise ValueError("EXPNUM not found: %s"%args.expnum)
+    elif len(exp) > 1:
+        msg = "Multiple values for EXPNUM found: %s"%args.expnum
+        for e in exp: msg += ("\n"+e)
+        raise ValueError(msg)
+    exp = exp[0]
+
+    zps = calibrate(args.outfile,select,exp,args.force)

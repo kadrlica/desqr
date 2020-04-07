@@ -44,7 +44,7 @@ if __name__ == "__main__":
                 print("No exposures with tag '%s'"%tags)
                 continue
             unitname = 'D%08d'%(exp['expnum'])
-            outbase = '%s_%s_cat.fits'%(unitname,band)
+            outbase = 'D%(expnum)08d_%(band)s_cat.fits'%(exp)
             outfile = os.path.join(outdir,outbase)
             if os.path.exists(outfile) and not args.force:
                 print 'Found %s; skipping...'%outfile

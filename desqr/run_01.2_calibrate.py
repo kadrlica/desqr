@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+Run photometric calibration against ATLAS-REFCAT2.
+"""
 import os
 import yaml
 import subprocess
@@ -10,39 +13,33 @@ from utils import mkdir
 import download
 
 if __name__ == "__main__":
-    import argparse
-    description = "downskim exposures to disk"
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=0,type=float)
-    parser.add_argument('-n','--njobs',default=24,type=int)
-    parser.add_argument('-q','--queue',default='vanilla')
-    parser.add_argument('-v','--verbose',action='store_true')
+    import parser
+    parser = parser.Parser(description=__doc__)
     args = parser.parse_args()
 
-    config = yaml.load(open(args.config))
-    zpsdir = config['zpsdir']
+    config = yaml.safe_load(open(args.config))
+    zpsdir = mkdir(config['zpsdir'])
     explist = config['explist']
     tags = config.get('tags')
     section = config.get('db','bliss')
 
     exposures = np.recfromcsv(explist)
     for band in config['bands']:
-        outdir = mkdir(os.path.join(rawdir,band))
+        outdir = mkdir(os.path.join(zpsdir,band))
         logdir = mkdir(os.path.join(outdir,'log'))
         for exp in exposures[exposures['band'] == band]:
+            print("WARNING: selecting on expnum!")
+            if exp['expnum'] < 600000: continue
             if (tags is not None) and (exp['tag'] not in tags):
                 print("No exposures with tag '%s'"%tags)
                 continue
-            unitname = 'D%08d'%(exp['expnum'])
-            outbase = '%s_%s_zps.fits'%(unitname,band)
+            outbase = config['zpsbase']%exp
             outfile = os.path.join(outdir,outbase)
             if os.path.exists(outfile) and not args.force:
                 print 'Found %s; skipping...'%outfile
                 continue
 
-            logfile = os.path.join(logdir,outbase.replace('.fits','.log'))
+            logfile = os.path.join(logdir,os.path.splitext(outbase)[0]+'.log')
             params = dict(expnum=exp['expnum'],tag=exp['tag'],
                           force='-f' if args.force else '',
                           verbose='-v' if args.verbose else '',

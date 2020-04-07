@@ -45,7 +45,7 @@ def read_csv_float32(filename):
     float_cols = np.array([c for c in df_test if df_test[c].dtype == "float64"])
     exclude = [name for pair in ALT_RADEC_COLUMNS for name in pair]
     float_cols = float_cols[~np.in1d(float_cols,exclude)]
-    float32_cols = {c: np.float32 for c in float_cols}
+    float32_cols = dict([(c, np.float32) for c in float_cols])
 
     return pd.read_csv(filename,encoding='ascii',engine='c',dtype=float32_cols).to_records(index=False)
 

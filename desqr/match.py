@@ -65,6 +65,16 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
 
 def match_query(lon1,lat1,lon2,lat2,eps=0.01):
     """
+    Perform a KDTree match after transforming to Cartesian coordinates.
+
+    Parameters
+    ----------
+    lon1 : longitude from first array (deg)
+    lat1 : latitude from first array (deg)
+    lon2 : longitude from second array (deg)
+    lat2 : latitude from second array (deg)
+    eps : precision (see `cKDTree.query`)
+
     Returns:
     --------
     idx1 : index into the first array
@@ -82,6 +92,20 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01):
     return idx1, idx2, ds
 
 def match_ball_tree(lon,lat,radius=1.0):
+    """ 
+    Internal catalog match. Finds closest match to each object other
+    than the object itself.
+
+    Parameters
+    ----------
+    lon : longitude (deg)
+    lat : latitude (deg)
+    radius : match radius (arcsec)
+    
+    Returns
+    -------
+    match_id : 
+    """
     if len(lon) != len(lat):
         msg = "Input lon and lat do not match"
         raise Exception(msg)

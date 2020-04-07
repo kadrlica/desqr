@@ -149,7 +149,8 @@ def create_downskim(filenames, select, exp, dtype=DTYPES, tag=TAG):
 
     data = np.hstack(data)
 
-    sel = select(data)
+    if select is None: sel = slice(None)
+    else:              sel = select(data)
     output = create_output(data[sel],exp,dtype)
 
     return output

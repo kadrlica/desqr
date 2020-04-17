@@ -76,7 +76,8 @@ def create_output(data,exp,dtype=DTYPES):
 
         # Fill some columns from exp
         if n in ['PFW_ATTEMPT_ID','TAG','UNITNAME','REQNUM','ATTNUM','T_EFF','TAG']:
-            out[n] = exp[n]
+            try:               out[n] = exp[n]
+            except ValueError: out[n] = exp[n.lower()]
 
     return out
 
@@ -183,8 +184,8 @@ if __name__ == "__main__":
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.getLogger().setLevel(level)
 
-    explist = pd.read_csv(args.explist,encoding='ascii').to_records()
-    explist.dtype.names = map(str.upper,explist.dtype.names)
+    explist = pd.read_csv(args.explist).to_records(index=False)
+    explist.dtype.names = [str(n).upper() for n in explist.dtype.names]
     exp = explist[explist['EXPNUM'] == args.expnum]
 
     if len(exp) == 0:

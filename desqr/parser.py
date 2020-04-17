@@ -18,7 +18,7 @@ class Parser(argparse.ArgumentParser):
                           help='number of jobs to submit')
         self.add_argument('-q','--queue',default='vanilla',
                           help='queue to submit')
-        self.add_argument('-s','--sleep',default=1,type=float,
+        self.add_argument('-s','--sleep',default=0,type=float,
                           help='sleep between jobs')
         self.add_argument('-v','--verbose',action='store_true',
                            help='output verbosity')

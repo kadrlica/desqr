@@ -52,7 +52,7 @@ def multiproc(func,args,kwargs):
     nargs = len(args)
     results = nargs*[None]
 
-    pool = Pool(maxtasksperchild=1)
+    pool = Pool(maxtasksperchild=1,processes=20)
     for i,arg in enumerate(args):
         def callback(result,i=i):
             results[i] = result
@@ -424,6 +424,35 @@ def get_vizier_catalog(ra,dec,radius=None,**kwargs):
     warnings.resetwarnings()
     return tab[0]
 
+def get_local_catalog(ra,dec,radius,catalog,**kwargs):
+    from ugali.utils.healpix import ang2disc
+
+    mapping = {}
+    if 'gaia' in catalog:
+        nside=32
+        dirname = '/data/des40.b/data/gaia/dr2/healpix'
+        basename = 'GaiaSource_%05d.fits'
+        columns = ['SOURCE_ID','RA','DEC']
+        mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
+
+    elif 'atlas-refcat' in catalog:
+        nside = 32
+        dirname = '/data/des40.b/data/atlas-refcat2/healpix'
+        basename = 'atlas-refcat2_%05d.fits'
+        columns = ['OBJID','RA','DEC','G']
+        mapping.update({})
+    else:
+        raise Exception('Unrecognized catalog: %s'%catalog)
+
+    pixels = ang2disc(nside, ra, dec, radius, inclusive=True)
+    filenames = [os.path.join(dirname,basename%p) for p in pixels]
+    filenames = [f for f in filenames if os.path.exists(f)]
+    cat = load_infiles(filenames,columns=columns)
+
+    names = [mapping.get(n,n) for n in cat.dtype.names]
+    cat.dtype.names = names
+    return cat
+        
 
 def print_problem(msg):
     import termcolor as color

@@ -14,13 +14,8 @@ import fitsio
 from ugali.utils.shell import mkdir
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=1,type=float)
-    parser.add_argument('-n','--njobs',default=10,type=int)
-    parser.add_argument('-q','--queue',default='vanilla')
+    from parser import Parser
+    parser = Parser(description=__doc__)
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))

@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+Spatial matching algorithms.
+"""
 import os, sys
 import fitsio
 import numpy as np
@@ -10,7 +13,7 @@ import gc
 import healpy
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
-from matplotlib.mlab import rec_append_fields
+from matplotlib.mlab import rec_append_fields, rec_drop_fields
 
 from ugali.utils.logger import logger
 import ugali.utils.projector as proj
@@ -302,8 +305,7 @@ def split(data,match_id):
 
 if __name__ == "__main__":
     import argparse
-    description = "python script"
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('infiles',nargs='+')
     parser.add_argument('-r','--radius',default=1.0,type=float,
                         help='matching radius')
@@ -344,7 +346,6 @@ if __name__ == "__main__":
         fileidx[f]=slice(imin,imax)
 
     zero_id = int(ZEROSTR%(pix,0))
-
 
     if len(data) == 1:
         match_id = np.array([0])

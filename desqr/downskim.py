@@ -20,9 +20,15 @@ from const import BANDS, TAGS
 #from archive.dexp import ObjectsTable
 
 #bliss_temp = '/export/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
-bliss_des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
-bliss_des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
-bliss_des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
+des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}'
+des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}'
+des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}'
+filebase = 'D00{expnum}_*_fullcat.fits'
+
+bliss_des50 = os.path.join(des50,filebase)
+bliss_des60 = os.path.join(des60,filebase)
+bliss_des61 = os.path.join(des61,filebase)
+PATHS = [bliss_des50, bliss_des60, bliss_des61]
 
 outtemp = '%(unitname)s_%(band)s.fits'
 
@@ -33,20 +39,24 @@ def get_dirname(expnum):
     """ Get base directory name """
     return expnum//100 * 100
 
-def get_filenames(expnum):
+def get_filenames(expnum,path=None):
     """ Get list of filenames """
     dirname = get_dirname(expnum)
     params = dict(expnum=expnum,dirname=dirname)
-    
-    for path in [bliss_des50,bliss_des60,bliss_des61]:
+
+    paths = [os.path.join(path,filebase)] if path is not None else PATHS
+
+    for path in paths:
         filenames = glob.glob(path.format(**params))
         if filenames: break
 
     if not filenames:
         msg = "File not found for: " + str(params)
-        msg += '\n'+bliss_des50.format(**params)
-        msg += '\n'+bliss_des60.format(**params)
-        msg += '\n'+bliss_des61.format(**params)
+        for path in paths:
+            msg += '\n'+path.format(**params)
+        #msg += '\n'+bliss_des50.format(**params)
+        #msg += '\n'+bliss_des60.format(**params)
+        #msg += '\n'+bliss_des61.format(**params)
         raise IOError(msg)
     return filenames
     
@@ -164,7 +174,8 @@ def downskim(outfile,select,exp,force):
         return
 
     expnum = exp['EXPNUM']
-    filenames = get_filenames(expnum)
+    path = None if 'PATH' not in exp.dtype.names else exp['PATH']
+    filenames = get_filenames(expnum,path)
     output = create_downskim(filenames,select,exp,DTYPES,TAG)
 
     logging.info("Writing %s..."%outfile)

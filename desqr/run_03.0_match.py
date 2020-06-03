@@ -18,17 +18,10 @@ from ugali.utils.shell import mkdir
 from const import OBJECT_ID
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true',
-                        help='force resubmission')
-    parser.add_argument('-s','--sleep',default=1,type=float,
-                        help='sleep between jobs')
+    from parser import Parser
+    parser = Parser(description=__doc__)
     parser.add_argument('-m','--mlimit',default=40,type=float,
                         help='memory limit (GB)')
-    parser.add_argument('-n','--njobs',default=15,type=int)
-    parser.add_argument('-q','--queue',default='vanilla')
     parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
@@ -50,7 +43,11 @@ if __name__ == "__main__":
         for f in infiles:
             if not done: break
             fits = fitsio.FITS(f)
-            done = (OBJECT_ID in fits[1].get_colnames())
+            try:
+                done = (OBJECT_ID in fits[1].get_colnames())
+            except IOError as e: 
+                print(f)
+                raise(e)
             fits.close()
 
         # Not really necessary to compare with force again...
@@ -60,8 +57,9 @@ if __name__ == "__main__":
 
         logfile = os.path.join(logdir,'hpx_%05d.log'%pix)
 
-        params=(radius,' '.join(infiles),force,mlimit)
+        params=(radius,force,mlimit,' '.join(infiles))
         cmd = 'match.py -r %s %s %s %s'%params
         submit = 'csub -q %s -o %s -n %s %s'%(args.queue,logfile,args.njobs,cmd)
+        if args.verbose: print(submit)
         subprocess.call(submit,shell=True)
         if args.queue != 'local': time.sleep(args.sleep)

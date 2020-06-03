@@ -14,13 +14,8 @@ from ugali.utils.shell import mkdir
 import download
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=0,type=float)
-    parser.add_argument('-n','--njobs',default=15,type=int)
-    parser.add_argument('-q','--queue',default='condor')
+    from parser import Parser
+    parser = Parser(description=__doc__)
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))
@@ -40,19 +35,20 @@ if __name__ == "__main__":
         download.download(zpfile,query,sqlfile=sqlfile,section=section,force=args.force)
 
     for band in config['bands']:
-        indir = os.path.join(hpxdir,band)
-        infiles = sorted(glob.glob(indir+'/*.fits'))
-        logdir = mkdir(os.path.join(indir,'log'))
-        for infile in infiles:
+        dirname = os.path.join(hpxdir,band)
+        filenames = sorted(glob.glob(dirname+'/*.fits'))
+        logdir = mkdir(os.path.join(dirname,'log'))
+        for filename in filenames:
+            basename = os.path.basename(filename)
 
             if not args.force:
-                fits = fitsio.FITS(infile)
+                fits = fitsio.FITS(filename)
                 colname = 'MAG_ZERO'
                 if colname in fits[1].get_colnames():
-                    print "Found column '%s'; skipping %s..."%(colname,os.path.basename(infile))
+                    print "Found column '%s'; skipping %s..."%(colname,basename)
                     continue
 
-            logbase = ('zp_'+os.path.basename(infile)).replace('.fits','.log')     
+            logbase = ('zp_'+basename).replace('.fits','.log')     
             logfile = os.path.join(logdir,logbase)
 
             if not blfile:
@@ -62,7 +58,7 @@ if __name__ == "__main__":
             elif isinstance(blfile,list):
                 blacklist = '-b '+' -b '.join(blfile)
             
-            params = dict(infile=infile,zpfile=zpfile,
+            params = dict(infile=filename,zpfile=zpfile,
                           blacklist = blacklist,
                           extinction = '-e %s'%ebv if ebv else '',
                           force = '-f' if args.force else '')

@@ -25,13 +25,13 @@ def draw_peak(peak,**kwargs):
     ax = plt.gca()
     ax.axvline(peak,**kwargs)
 
-def draw_hist(skymap,**kwargs):
-    if isinstance(skymap,np.ma.MaskedArray):
-        pix = np.where(~skymap.mask)
+def draw_hist(hpxmap,**kwargs):
+    if isinstance(hpxmap,np.ma.MaskedArray):
+        pix = np.where(~hpxmap.mask)
     else:
-        pix = np.where((np.isfinite(skymap)) & (skymap !=healpy.UNSEEN))
+        pix = np.where((np.isfinite(hpxmap)) & (hpxmap !=healpy.UNSEEN))
 
-    data = skymap[pix]
+    data = hpxmap[pix]
     kwargs.setdefault('bins',np.linspace(data.min(),data.max(),100))
     kwargs.setdefault('histtype','step')
     kwargs.setdefault('normed',True)
@@ -57,17 +57,17 @@ def draw_hist(skymap,**kwargs):
 
     return quantiles,percentiles
 
-def draw_footprint(skymap,proj='car',**kwargs):
+def draw_footprint(hpxmap,proj='car',**kwargs):
     """
     Draw plot of footprint.
     """
-    if not isinstance(skymap,np.ma.MaskedArray):
-        mask = ~np.isfinite(skymap) | (skymap==healpy.UNSEEN)
-        skymap = np.ma.MaskedArray(skymap,mask=mask)
-    pix = np.where(~skymap.mask)
+    if not isinstance(hpxmap,np.ma.MaskedArray):
+        mask = ~np.isfinite(hpxmap) | (hpxmap==healpy.UNSEEN)
+        hpxmap = np.ma.MaskedArray(hpxmap,mask=mask)
+    pix = np.where(~hpxmap.mask)
 
-    vmin,vmax = np.percentile(skymap[pix],[0.5,99.5])
-    #vmin,vmax = np.percentile(skymap[pix],[0.5,99])
+    vmin,vmax = np.percentile(hpxmap[pix],[0.5,99.5])
+    #vmin,vmax = np.percentile(hpxmap[pix],[0.5,99])
 
     kwargs.setdefault('vmin',vmin)
     kwargs.setdefault('vmax',vmax)
@@ -76,7 +76,7 @@ def draw_footprint(skymap,proj='car',**kwargs):
     extent = kwargs.pop('extent',[180,-180,-90,20])
     xmin,xmax,ymin,ymax = extent
 
-    nside = healpy.npix2nside(len(skymap))
+    nside = healpy.npix2nside(len(hpxmap))
 
     steps = 500
     xx,yy = np.meshgrid(np.linspace(xmin,xmax,steps),
@@ -84,7 +84,7 @@ def draw_footprint(skymap,proj='car',**kwargs):
     pp = ang2pix(nside,xx,yy)
 
     ax = plt.gca()
-    im = ax.pcolormesh(xx[::-1],yy,skymap[pp],**kwargs)
+    im = ax.pcolormesh(xx[::-1],yy,hpxmap[pp],**kwargs)
     ax.set_xlabel('RA (deg)')
     ax.set_ylabel('DEC (deg)')
     ax.set_xlim(xmin,xmax)
@@ -93,49 +93,67 @@ def draw_footprint(skymap,proj='car',**kwargs):
     ax.grid(ls=':',color='black',lw=0.5)
     return im
 
-def draw_des(skymap,proj='car',**kwargs):
+def draw_survey(hpxmap,**kwargs):
+    from skymap.survey import SurveySkymap
+    smap = SurveySkymap()
+    return smap.draw_hpxmap(hpxmap,**kwargs)
+
+
+def draw_des(hpxmap,**kwargs):
     """ 
     Draw DES footprint:
        110 > RA > -70, -70 < DEC < 10
     """
-    kwargs.setdefault('extent',[110,-70,-70,10])
-    return draw_footprint(skymap,proj,**kwargs)
+    from skymap.survey import DESSkymap
+    smap = DESSkymap()
+    smap.draw_des()
+    return smap.draw_hpxmap(hpxmap,**kwargs)
 
-def draw_maglites(skymap,proj='car',**kwargs):
+def draw_maglites(hpxmap,**kwargs):
     """ 
     Draw MagLiteS footprint:
        280 > RA > 80, -90 < DEC < -50
     """
-    kwargs.setdefault('extent',[280,80,-90,-50])
-    im = draw_footprint(skymap,proj,**kwargs)
-    return im
+    from skymap.survey import MaglitesSkymap
+    smap = MaglitesSkymap()
+    smap.draw_maglites()
+    return smap.draw_hpxmap(**kwargs)
 
-def draw_bliss(skymap,proj='car',**kwargs):
+def draw_bliss(hpxmap,**kwargs):
     """ 
     Draw BLISS footprint:
        360 > RA > 120, -60 < DEC < -10
     """
-    kwargs.setdefault('extent',[360,120,-60,-10])
-    im = draw_footprint(skymap,proj,**kwargs)
-    return im
+    from skymap.survey import BlissSkymap
+    smap = BlissSkymap()
+    smap.draw_bliss()
+    return smap.draw_hpxmap(hpxmap,**kwargs)
 
-def draw_desgw(skymap,proj='car',**kwargs):
+def draw_desgw(hpxmap,proj='car',**kwargs):
     kwargs.setdefault('extent',[180,30,-80,-50])
-    return draw_footprint(skymap,proj,**kwargs)
+    return draw_footprint(hpxmap,proj,**kwargs)
 
-def draw_pixel(skymap,**kwargs):
-    if isinstance(skymap,np.ma.MaskedArray):
-        pix = np.where(~skymap.mask)
+def draw_survey(survey,hpxmap,**kwargs):
+    kwargs.setdefault('cmap','viridis')
+    if survey == 'des': return draw_des(hpxmap,**kwargs)
+    elif survey == 'maglites': return draw_maglites(hpxmap,**kwargs)
+    elif survey == 'bliss': return draw_bliss(hpxmap,**kwargs)
+    elif survey == 'delve': return draw_bliss(hpxmap,**kwargs)
+    else: return draw_survey(hpxmap,**kwargs)
+
+def draw_pixel(hpxmap,**kwargs):
+    if isinstance(hpxmap,np.ma.MaskedArray):
+        pix = np.where(~hpxmap.mask)
     else:
-        pix = np.where((np.isfinite(skymap)) & (skymap !=healpy.UNSEEN))
+        pix = np.where((np.isfinite(hpxmap)) & (hpxmap !=healpy.UNSEEN))
 
-    vmin,vmax = np.percentile(skymap[pix],[0.5,99.5])
+    vmin,vmax = np.percentile(hpxmap[pix],[0.5,99.5])
     kwargs.setdefault('vmin',vmin)
     kwargs.setdefault('vmax',vmax)
     kwargs.setdefault('rasterized',True)
     kwargs.setdefault('cmap','jet')
 
-    nside = healpy.npix2nside(len(skymap))
+    nside = healpy.npix2nside(len(hpxmap))
     pixrad = np.degrees(healpy.max_pixrad(nside))
     ra,dec = pix2ang(nside,pix)
 
@@ -147,7 +165,7 @@ def draw_pixel(skymap,**kwargs):
     pp = ang2pix(nside,xx,yy)
 
     ax = plt.gca()
-    im = ax.pcolormesh(xx[::-1],yy,skymap[pp],**kwargs)
+    im = ax.pcolormesh(xx[::-1],yy,hpxmap[pp],**kwargs)
     ax.set_xlabel('RA (deg)')
     ax.set_ylabel('DEC (deg)')
     ax.set_xlim(xmax,xmin)

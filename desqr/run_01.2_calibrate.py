@@ -34,7 +34,11 @@ if __name__ == "__main__":
 
     for band in bands:
         expband = exposures[exposures['band'] == band]
-        
+
+        if len(expband) == 0:
+            print("WARNING: No exposures found for %s-band; skipping..."%band)
+            continue
+
         outdir = mkdir(os.path.join(zpsdir,band))
         logdir = mkdir(os.path.join(outdir,'log'))
 

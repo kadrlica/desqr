@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+Assemble multi-band unique catalog.
+"""
 import os
 import yaml
 import subprocess
@@ -11,14 +14,10 @@ from ugali.utils.shell import mkdir
 from utils import found
 
 if __name__ == "__main__":
-    import argparse
-    description = "python script"
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=1,type=float)
-    parser.add_argument('-n','--njobs',default=20,type=int)
-    parser.add_argument('-q','--queue',default='condor')
+    from parser import Parser
+    parser = Parser()
+    parser.add_argument('-p','--pix',default=None,action='append',type=int,
+                        help='pixels to submit')
     args = parser.parse_args()
     
     force = '-f' if args.force else ''
@@ -29,7 +28,11 @@ if __name__ == "__main__":
     keydir = mkdir(config['keydir'])
     logdir = mkdir(os.path.join(catdir,'log'))
 
-    for pix in np.arange(healpy.nside2npix(config['nside'])):
+    pixels = args.pix
+    if pixels is None:
+        pixels = np.arange(healpy.nside2npix(config['nside']))
+
+    for pix in pixels:
         infiles = glob.glob(hpxdir+'/*/*%05d*.fits'%pix)
         basename = 'hpx_%05d.fits'%pix
         outfile = os.path.join(catdir,'cat_'+basename)

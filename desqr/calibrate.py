@@ -277,7 +277,8 @@ def calibrate(outfile,select,exp,force):
         return
 
     expnum = exp['expnum']
-    filenames = downskim.get_filenames(expnum)
+    path = None if 'path' not in exp.dtype.names else exp['path']
+    filenames = downskim.get_filenames(expnum,path)
 
     logging.info("Reading object catalog...")
     catalog = downskim.create_downskim(filenames,select,exp=exp,dtype=DTYPES)

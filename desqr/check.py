@@ -16,7 +16,7 @@ import numpy as np
 from const import BANDS,OBJECT_ID,UNIQUE_ID,BADMAG
 from utils import bfields
 
-SECTIONS = ['download','pixelize','zeropoint','match','catalog','nan']
+SECTIONS = ['download','pixelize','match','zeropoint','catalog','nan']
 OK  = color('OK','green')
 FAIL = color('FAIL','red')
 BAD = color('BAD','red')
@@ -74,8 +74,9 @@ def init_counter(args):
 def run_pool(func, args, **kwargs):
     """ Initialize the pool with a shared counter """
     global counter
+    kwargs.setdefault('processes',30)
     counter = Value('i',0)
-    pool = Pool(processes=30,initializer=init_counter, initargs=(counter,),**kwargs)
+    pool = Pool(initializer=init_counter, initargs=(counter,),**kwargs)
     return pool.map(func,args)
 
 def check_files(explist,files):
@@ -254,6 +255,7 @@ if __name__ == "__main__":
     sections = opts.sections if opts.sections else SECTIONS
 
     bands  = opts.bands if opts.bands else config['bands']
+    BANDS  = bands
     rawdir = config['rawdir']
     hpxdir = config['hpxdir']
 
@@ -332,6 +334,19 @@ if __name__ == "__main__":
                 print FAIL if np.any(out) else OK
 
             ##############################
+            if section == 'match':
+                dirname = join(config['hpxdir'],band)
+                if not dir_exists(dirname): continue
+                
+                files = sorted(glob.glob(dirname+'/*.fits'))
+                nfiles = len(files)
+                args = [(f,nfiles,band) for f in files]
+
+                print "  Object IDs:"
+                out = run_pool(check_objid,args)
+                print FAIL if np.any(out) else OK
+                    
+            ##############################
             if section == 'zeropoint':
                 dirname = join(config['hpxdir'],band)
                 if not dir_exists(dirname): continue
@@ -348,19 +363,6 @@ if __name__ == "__main__":
                 out = run_pool(check_magnitude,args)
                 print FAIL if np.any(out) else OK
             
-            ##############################
-            if section == 'match':
-                dirname = join(config['hpxdir'],band)
-                if not dir_exists(dirname): continue
-                
-                files = sorted(glob.glob(dirname+'/*.fits'))
-                nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
-
-                print "  Object IDs:"
-                out = run_pool(check_objid,args)
-                print FAIL if np.any(out) else OK
-                    
             ##############################
             if section == 'catalog':
                 catdir = config['catdir']

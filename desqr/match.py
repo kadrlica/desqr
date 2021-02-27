@@ -10,18 +10,27 @@ from collections import OrderedDict as odict
 import logging
 import gc
 
-import healpy
+import healpy as hp
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
-from matplotlib.mlab import rec_append_fields, rec_drop_fields
+
+try:
+    from matplotlib.mlab import rec_append_fields
+except ImportError:
+    from ugali.utils.mlab import rec_append_fields
 
 from ugali.utils.logger import logger
 import ugali.utils.projector as proj
 
-import utils
-#from utils import logger
-from const import ZEROSTR,OBJECT_ID
-from split import split_qcat
+
+try:
+    from utils import set_memory_limit, insert_columns
+    from const import ZEROSTR,OBJECT_ID
+    from split import split_qcat
+except ModuleNotFoundError:
+    from .utils import set_memory_limit, insert_columns
+    from .const import ZEROSTR,OBJECT_ID
+    from .split import split_qcat
 
 MATCHCOLS = ['RA','DEC','EXPNUM']
 
@@ -40,7 +49,7 @@ MATCHCOLS = ['RA','DEC','EXPNUM']
 ###     return coords
 
 def projector(lon,lat):
-    return healpy.rotator.dir2vec(lon,lat,lonlat=True).T
+    return hp.rotator.dir2vec(lon,lat,lonlat=True).T
 
 def centroid(lon,lat,stat='median',labels=None,index=None):
     if labels is None: 
@@ -48,7 +57,7 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
 
     if index is None: index = np.unique(labels)
 
-    x,y,z = healpy.rotator.dir2vec(lon,lat,lonlat=True)
+    x,y,z = hp.rotator.dir2vec(lon,lat,lonlat=True)
 
     if stat == 'mean':
         x_out = nd.mean(x,labels=labels,index=index)
@@ -62,11 +71,11 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
         msg = "Unrecognized stat: %s"%stat
         raise Exception(msg)
 
-    lon_out, lat_out = healpy.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
+    lon_out, lat_out = hp.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
 
     return lon_out % 360.,lat_out
 
-def match_query(lon1,lat1,lon2,lat2,eps=0.01):
+def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
     """
     Perform a KDTree match after transforming to Cartesian coordinates.
 
@@ -76,7 +85,8 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01):
     lat1 : latitude from first array (deg)
     lon2 : longitude from second array (deg)
     lat2 : latitude from second array (deg)
-    eps : precision (see `cKDTree.query`)
+    eps  : precision (see `cKDTree.query`)
+    n_jobs : Number of workers to use for processing (see `cKDTree.query`)
 
     Returns:
     --------
@@ -89,10 +99,10 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01):
  
     tree = cKDTree(coords2)
     idx1 = np.arange(lon1.size) 
-    idx2 = tree.query(coords1,eps=eps)[1]
+    idx2 = tree.query(coords1,eps=eps,n_jobs=n_jobs)[1]
 
     ds = proj.angsep(lon1, lat1, lon2[idx2], lat2[idx2])
-    return idx1, idx2, ds
+    return np.atleast_1d(idx1), np.atleast_1d(idx2), np.atleast_1d(ds)
 
 def match_ball_tree(lon,lat,radius=1.0):
     """ 
@@ -323,7 +333,7 @@ if __name__ == "__main__":
     
     if args.mlimit: 
         logger.info("Setting memory limit: %.1fGB"%(args.mlimit))
-        soft,hard = utils.set_memory_limit(args.mlimit*1024**3)
+        soft,hard = set_memory_limit(args.mlimit*1024**3)
         logger.info("Memory limit: %.1fGB"%(soft/1024.**3))
 
     logger.info("Matching files: %s"%args.infiles)
@@ -365,7 +375,7 @@ if __name__ == "__main__":
     # Write out columns
     for f,idx in fileidx.items():
         logger.info("Inserting column(s) into %s..."%f)
-        utils.insert_columns(f,out[idx],force=args.force)
+        insert_columns(f,out[idx],force=args.force)
 
 
     ### uid,inv = np.unique(match_id,return_inverse=True)

@@ -20,7 +20,7 @@ except ImportError:
     from ugali.utils.mlab import rec_append_fields
 
 from ugali.utils.logger import logger
-import ugali.utils.projector as proj
+from ugali.utils.projector import angsep
 
 
 try:
@@ -101,7 +101,7 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
     idx1 = np.arange(lon1.size) 
     idx2 = tree.query(coords1,eps=eps,n_jobs=n_jobs)[1]
 
-    ds = proj.angsep(lon1, lat1, lon2[idx2], lat2[idx2])
+    ds = angsep(lon1, lat1, lon2[idx2], lat2[idx2])
     return np.atleast_1d(idx1), np.atleast_1d(idx2), np.atleast_1d(ds)
 
 def match_ball_tree(lon,lat,radius=1.0):
@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
     ### uid,inv = np.unique(match_id,return_inverse=True)
     ### median_ra,median_dec = centroid(data['RA'],data['DEC'],stat='median',labels=match_id,index=uid)
-    ### sep = proj.angsep(data['RA'],data['DEC'],median_ra[inv],median_dec[inv])
+    ### sep = angsep(data['RA'],data['DEC'],median_ra[inv],median_dec[inv])
     ### import pylab as plt; plt.ion()
     ### plt.hist(sep*3600.,bins=100,log=True)
      

@@ -27,11 +27,17 @@ import utils
 
 from ugali.utils.healpix import ang2disc
 
+SURVEYS = ['refcat2','desdr2']
 UID     = 'FILENAME'
 FLUX    = 'FLUX_APER_08'
 FLUXERR = 'FLUXERR_APER_08'
 DTYPES = downskim.DTYPES + [(FLUX, '>f4'), (FLUXERR, '>f4')]
 REFCAT_COLUMNS = ['OBJID','RA','DEC','G','DG','R','DR','I','DI','Z','DZ']
+DESDR2_COLUMNS = ['COADD_OBJECT_ID','RA','DEC',
+                  'WAVG_MAG_PSF_G','WAVG_MAGERR_PSF_G',
+                  'WAVG_MAG_PSF_R','WAVG_MAGERR_PSF_R',
+                  'WAVG_MAG_PSF_I','WAVG_MAGERR_PSF_I',
+                  'WAVG_MAG_PSF_Z','WAVG_MAGERR_PSF_Z']
 
 # Transformation coefficients
 # mag_des = mag_ps + A[mag][0]*color_ps + A[mag][1]
@@ -42,8 +48,9 @@ A = odict([
         ('z', [-0.2575, -0.0074]), # [-0.2 < (i-z)_ps <= 0.3]
         ('Y', [-0.6032, +0.0185]), # [-0.2 < (i-z)_ps <= 0.3]
         ])
+
 # Updated based on fit to DES
-A = odict([
+REFCAT2 = odict([
         ('g', [+0.0994, -0.0076 - 0.0243]), # [-0.2 < (g-r)_ps <= 1.2]
         ('r', [-0.1335, +0.0189 + 0.0026]), # [-0.2 < (g-r)_ps <= 1.2]
         ('i', [-0.3407, +0.0026 - 0.0039]), # [-0.2 < (i-z)_ps <= 0.3]
@@ -51,8 +58,16 @@ A = odict([
         ('Y', [-0.6032, +0.0185]),          # [-0.2 < (i-z)_ps <= 0.3]
         ])
 
+DESDR2 = odict([
+        ('g', [0.0, 0.0]), 
+        ('r', [0.0, 0.0]), 
+        ('i', [0.0, 0.0]), 
+        ('z', [0.0, 0.0]), 
+        ('Y', [0.0, 0.0]), 
+        ])
 
-def derive_zeropoints(dataFrame, band):
+
+def derive_zeropoints(dataFrame, band, survey='refcat2'):
     """ Modification of Douglas Tucker's `DELVE_tie_to_stds`.
 
     Parameters
@@ -69,6 +84,11 @@ def derive_zeropoints(dataFrame, band):
     #information to determine the reference magnitude for each
     #object. Not really necessary for single-exposure calibration, but
     #would remove the restriction on specifying `band` at input.
+
+    if   survey == 'refcat2': A = REFCAT2
+    elif survey == 'desdr2':  A = DESDR2
+    else: 
+        raise Exception('Unrecognized survey: %s'%survey)        
 
     logging.info("Starting to derive zeropoints...")
     logging.debug(datetime.datetime.now())
@@ -229,6 +249,37 @@ def read_refcat(ra,dec,radius=1.5):
     refcat = utils.load_infiles(filenames,columns=columns)
     return refcat
 
+def read_desdr2(ra,dec,radius=1.5):
+    """ Read the reference catalog in a localized region.
+
+    Parameters
+    ----------
+    ra : ra (deg)
+    dec : dec (deg)
+    radius : regional radius (deg)
+
+    Returns
+    -------
+    refcat : reference catalog columns
+    """
+    
+    nside = 32
+    pixels = ang2disc(nside, ra, dec, radius, inclusive=True)
+    dirname = '/data/des40.b/data/y6a1/gold/1.1/healpix'
+    basename = 'y6_gold_1_0_%05d.fits'
+    filenames = [os.path.join(dirname,basename%p) for p in pixels]
+    #filenames = [f for f in filenames if os.path.exists(f)]
+    columns = DESDR2_COLUMNS
+    refcat = utils.load_infiles(filenames,columns=columns)
+    refcat = refcat[refcat['WAVG_MAG_PSF_R'] < 21]
+
+    mapping = dict(zip(DESDR2_COLUMNS,REFCAT_COLUMNS))
+    new_names = [mapping[n] for n in refcat.dtype.names]
+    refcat.dtype.names = new_names
+
+    return refcat
+    
+
 def merge_refcat(catalog,refcat,angsep=1.0):
     """ Match and merge catalog and reference catalog.
     Both catalogs must contain the columns `RA` and `DEC`.
@@ -258,7 +309,7 @@ def merge_refcat(catalog,refcat,angsep=1.0):
     # Return the merged data frame (note that columns will be duplicated)
     return pd.concat([df1,df2],axis=1)
 
-def calibrate(outfile,select,exp,force):
+def calibrate(outfile,select,exp,survey,force):
     """ The calibration driver function.
 
     Parameters
@@ -266,6 +317,7 @@ def calibrate(outfile,select,exp,force):
     outfile : output file name
     select  : selection function for skimming observed catalog
     exp     : exposure info
+    survey  : survey
     force   : force overwrite of output file
 
     Returns
@@ -286,11 +338,18 @@ def calibrate(outfile,select,exp,force):
 
     logging.info("Reading reference catalog...")
     refang = 1.2 # config param: reference catalog angular selection (deg)
-    refcat = read_refcat(exp['telra'],exp['teldec'],refang)
+
+    if survey == 'refcat2': 
+        refcat = read_refcat(exp['telra'],exp['teldec'],refang)
+    elif survey == 'desdr2':
+        refcat = read_desdr2(exp['telra'],exp['teldec'],refang)
+    else:
+        raise Exception('Unrecognized survey: %s'%survey)
     logging.info("  %s objects"%len(refcat))
 
     logging.info("Matching with reference catalog...")
-    angsep = 1.0 # config param: angular separation for matching (arcsec)
+    #angsep = 1.0 # config param: angular separation for matching (arcsec)
+    angsep = 0.5 # config param: angular separation for matching (arcsec)
     dataFrame = merge_refcat(catalog,refcat,angsep)
     logging.info("  %s objects"%len(dataFrame))
 
@@ -301,7 +360,7 @@ def calibrate(outfile,select,exp,force):
         dataFrame.to_csv(fname, index=False)
 
     logging.info("Deriving zeropoints...")
-    output = derive_zeropoints(dataFrame,exp['band'])
+    output = derive_zeropoints(dataFrame,exp['band'],survey=survey)
 
     logging.info("Writing %s..."%outfile)
     ext = os.path.splitext(outfile)[-1]
@@ -321,10 +380,11 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true',
                         help='force rerun')
     parser.add_argument('-e','--expnum',nargs='+',default=[],type=int,
-                        action='append',
-                        help='exposure number')
+                        action='append',help='exposure number')
     parser.add_argument('-v','--verbose',action='store_true',
                         help='verbose output')
+    parser.add_argument('-s','--survey',default='refcat2',choices=SURVEYS,
+                        help='data set tag')
     parser.add_argument('-t','--tag',default=None,choices=TAGS,
                         help='data set tag')
     args = parser.parse_args()
@@ -367,7 +427,7 @@ if __name__ == "__main__":
         outfile = args.outfile.format(**edict)
 
         try: 
-            zps = calibrate(outfile,select,exp,args.force)
+            zps = calibrate(outfile,select,exp,args.survey,args.force)
         except Exception as e:
             logging.error(str(e))
             status = 1

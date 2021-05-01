@@ -272,44 +272,51 @@ def match_exposures(data,radius=1.0):
 
     return match_id 
 
-def split(data,match_id):
+def split(data,match_id,objid=OBJECT_ID):
     """Split matched objects into pairs if consistently separated.
+    
+    Wraps around the `split_qcat` function from Eric Neilsen.
     
     Parameters:
     -----------
     data     : the input record array
-    match_id : the object match ID
+    match_id : array of object match ID
 
     Returns:
     --------
-    df       : a DataFrame containing 'QUICK_OBJECT_ID','SUB_ID', and 'SPLIT_FLAG'
+    rec       : recarray of [OBJECT_ID,'PARENT_ID','SUB_ID','SPLIT_FLAG']
     """
-    logger.info("Splitting objects...")
-
     # Columns used by the split
-    objid,subid,flag = ['QUICK_OBJECT_ID','SUB_ID','SPLIT_FLAG']
-    data = data.byteswap().newbyteorder()
+    parid,subid,flag = ['PARENT_ID','SUB_ID','SPLIT_FLAG']
+    dtype = [(objid,int),(parid,int),(subid,'i2'),(flag,'S15')]
 
     # Create a DataFrame and run the splitting
-    df=pd.DataFrame(rec_append_fields(data,objid,match_id))
-    split = split_qcat(df)[[objid,subid,flag]]
+    df = pd.DataFrame(data.byteswap().newbyteorder())
+    df[objid] = match_id
+    df[parid] = match_id
+
+    split = split_qcat(df)[[objid,parid,subid,flag]]
 
     if len(split) != len(df):
         msg = "Length of split objects differs from input."
         raise Exception(msg)
-
+        
     # Increment the match_id for split objects
-    subsel = (split[subid] > 0)
-    nsub = subsel.sum()
-    split[objid][subsel] = split[objid].max() + np.arange(1,nsub+1)
+    objid_max = split[objid].max()
+    subid_sel = (split[flag] == 'split') & (split[subid] > 0)
+    # Assign new objid to each unique objid, subid pair
+    group_id = split.loc[subid_sel].groupby([objid,subid]).ngroup()
+    split.loc[group_id.index,objid] = objid_max + 1 + group_id.values
 
     # Convert back to recarray 
-    dtype = [(objid,int),(subid,'i2'),(flag,'S15')]
     rec = np.empty(len(split),dtype=dtype)
     for n in rec.dtype.names:
         rec[n] = split[n]
 
-    logger.info("Split %i objects."%(nsub))
+    # Number of split objects and new objects
+    ndet = (split[flag] == 'split').sum()
+    nobj = len(np.unique(group_id))
+    logger.info("Split %i detections into %i new objects."%(ndet,nobj))
 
     return rec
 
@@ -325,6 +332,8 @@ if __name__ == "__main__":
                         help='name of output object identifier')
     parser.add_argument('-f','--force',action='store_true',
                         help='overwrite output columns if they exist')
+    parser.add_argument('-s','--split',action='store_true',
+                        help='split double objects')
     parser.add_argument('-v','--verbose',action='store_true',
                         help='output verbosity')
     args = parser.parse_args()
@@ -361,26 +370,19 @@ if __name__ == "__main__":
         match_id = np.array([0])
     else:
         match_id = match_ball_tree(data['RA'],data['DEC'],radius=args.radius)
-    #match_id = match_multi_stage(data['RA'],data['DEC'],radius=args.radius)
+        #match_id = match_multi_stage(data['RA'],data['DEC'],radius=args.radius)
     match_id += zero_id
 
-    # Run the split
-    out = split(data,match_id)
-    # Name the match_id column
-    out.dtype.names = [args.objid] + list(out.dtype.names)[1:]
-
-    ## Just use the match_id
-    #out = np.rec.array(match_id,dtype=[(args.objid,match_id.dtype)],copy=False)
+    if args.split:
+        # Run the split
+        logger.info("Splitting objects...")
+        out = split(data,match_id,objid=args.objid)
+    else:
+        # Just use the match_id
+        out = np.rec.array(match_id,dtype=[(args.objid,match_id.dtype)],copy=False)
 
     # Write out columns
     for f,idx in fileidx.items():
         logger.info("Inserting column(s) into %s..."%f)
         insert_columns(f,out[idx],force=args.force)
-
-
-    ### uid,inv = np.unique(match_id,return_inverse=True)
-    ### median_ra,median_dec = centroid(data['RA'],data['DEC'],stat='median',labels=match_id,index=uid)
-    ### sep = angsep(data['RA'],data['DEC'],median_ra[inv],median_dec[inv])
-    ### import pylab as plt; plt.ion()
-    ### plt.hist(sep*3600.,bins=100,log=True)
      

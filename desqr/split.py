@@ -3,6 +3,7 @@ Split incorrectly matched catalog objects.
 
 Adapted from Eric Neilsen's split_qcat:
 /data/des60.b/data/neilsen/split_qcat/split_qcat.py
+/data/des60.b/data/neilsen/split_qcat/split_qcat_original.py
 """
 __author__ = "Eric Neilsen"
 
@@ -22,8 +23,8 @@ SPLIT_FLAG = odict([
         ('merged'         , 2**5),
 ])
 
-def split_doubles(epochs, kmeans_iterations=3):
-    """Split a DataFrame of doubled objects into subobjects
+def split_doubles(epochs, kmeans_iterations=3, objid='QUICK_OBJECT_ID'):
+    """Split a DataFrame of doubled objects into sub-objects
 
     The DataFrame is assumed to be prepared to have exactly two
     detections per object per exposure.
@@ -33,17 +34,19 @@ def split_doubles(epochs, kmeans_iterations=3):
     and a MultiIndex row index with the following levels:
       QUICK_OBJECT_ID, EXPNUM
 
-    If SUB_ID or SPLIT_FLAG are present, the will be overwritten in the
+    If SUB_ID or SPLIT_FLAG are present, they will be overwritten in the
     return.
 
-    Args:
-      epochs: the pandas DataFrame with the objects to split
-      kmeans_iterations: iterations to refine sub-object locations
+    Parameters
+    ----------
+    epochs: the pandas DataFrame with the objects to split
+    kmeans_iterations: iterations to refine sub-object locations
 
-    Return:
-      a copy of the pandas DataFrame supplied with two additonal columns:
-        SUB_ID, identifying which subobject each row is identified with
-        SPLIT_FLAG, a string containing "split" if the split was successful, 
+    Returns
+    -------
+    df: a copy of the pandas DataFrame supplied with two additonal columns:
+        SUB_ID -- identifying which subobject each row is identified with
+        SPLIT_FLAG -- a string containing "split" if the split was successful, 
           or "failed split" otherwise
     """
     # epochs assumed to be cleaned to objects and epochs with two
@@ -56,7 +59,7 @@ def split_doubles(epochs, kmeans_iterations=3):
     
     # Get the reference EXPNUM for each object
     obj_expnums = pd.Series(epochs.index.get_level_values('EXPNUM'),
-                            index=epochs.index.get_level_values('QUICK_OBJECT_ID'))
+                            index=epochs.index.get_level_values(objid))
     ref_expnums = obj_expnums.groupby(level=0).min()
 
     # Get coordinates for objects in reference image
@@ -67,15 +70,15 @@ def split_doubles(epochs, kmeans_iterations=3):
     ref_coords.loc[:,'SUB_ID'] = ref_coords.groupby(level=(0,1)).cumcount()
     ref_coords.reset_index(inplace=True)
     ref_coords.drop(['EXPNUM'], axis=1, inplace=True)
-    ref_coords.set_index(['QUICK_OBJECT_ID', 'SUB_ID'], inplace=True)
-    
+    ref_coords.set_index([objid, 'SUB_ID'], inplace=True)
+
     for kmeans_iteration in range(kmeans_iterations):
         if kmeans_iteration > 0:
             # if this is not the first iteration,
             # revise reference coordinates based on the previous iteration
             ref_coord_input = obj_offsets.query("SPLIT_FLAG=='split'")
             ref_coord_input.reset_index(inplace=True)
-            ref_coord_input.set_index(['QUICK_OBJECT_ID', 'SUB_ID'], inplace=True)
+            ref_coord_input.set_index([objid, 'SUB_ID'], inplace=True)
 
             # because of the spherical coordinate wrap-around, we cannot just
             # average RA and DEC to refine our reference center.
@@ -103,7 +106,7 @@ def split_doubles(epochs, kmeans_iterations=3):
         epochs = epochs.reset_index()
         epochs.drop(['SUB_ID'], axis=1, inplace=True)
         ref_coords = ref_coords.reset_index()
-        obj_offsets = epochs.merge(ref_coords, on='QUICK_OBJECT_ID')
+        obj_offsets = epochs.merge(ref_coords, on=objid)
         # haversine formula
         obj_offsets.eval(
             'HAVANG = sin((DEC_RAD-REF_DEC_RAD)/2)**2 + cos(DEC_RAD)*cos(REF_DEC_RAD)*(sin((RA_RAD-REF_RA_RAD)/2)**2)',
@@ -112,7 +115,7 @@ def split_doubles(epochs, kmeans_iterations=3):
         # The object is closest where cos(angle) is largest
         # so get the largest cos(angle) for each detection,
         # and select only object/subobject pairs with that angle
-        obj_offsets.set_index(['QUICK_OBJECT_ID', 'EXPNUM', 'RA', 'DEC'], inplace=True)
+        obj_offsets.set_index([objid, 'EXPNUM', 'RA', 'DEC'], inplace=True)
         min_obj_offsets = obj_offsets.groupby(level=(0,1,2,3)).agg({'HAVANG': 'min'})
         min_obj_offsets.columns = ['MIN_HAVANG']
         obj_offsets = obj_offsets.merge(min_obj_offsets, left_index=True, right_index=True)
@@ -128,13 +131,14 @@ def split_doubles(epochs, kmeans_iterations=3):
         if len(failed_split)>0:
             obj_offsets.loc[failed_split, ['SPLIT_FLAG']] == 'failed split'
 
-        epochs = obj_offsets.reset_index().set_index(['QUICK_OBJECT_ID', 'EXPNUM'])
+        epochs = obj_offsets.reset_index().set_index([objid, 'EXPNUM'])
         epochs.drop(['REF_RA_RAD', 'REF_DEC_RAD', 'MIN_HAVANG'], axis=1, inplace=True)
 
-    epochs = epochs.loc[:, initial_epochs_cols]            
+    epochs = epochs.loc[:, initial_epochs_cols]
+
     return epochs
     
-def split_qcat(qcat):
+def split_qcat(qcat, objid='QUICK_OBJECT_ID'):
     """Split a DataFrame of detected objects into subobjects when necessary
 
     The DataFrame requires the following columns:
@@ -154,20 +158,22 @@ def split_qcat(qcat):
         'failed split': a pair that was not split successfully
         'merged': detected once in this exposure, but pairs in others
 
-    Args:
+    Parameters
+    ----------
       qcat: the pandas DataFrame with the objects to split
 
-    Return:
-      a copy of the pandas DataFrame supplied with two additonal columns:
-        SUB_ID, identifying which subobject each row is identified with
-        SPLIT_FLAG, a string containing "split" if the split was successful, 
+    Returns
+    -------
+    df: a copy of the pandas DataFrame supplied with two additonal columns:
+        SUB_ID -- identifying which subobject each row is identified with
+        SPLIT_FLAG -- a string containing "split" if the split was successful, 
           or "failed split" otherwise
     """
 
     epochs = qcat.copy(deep=True)
     epochs.loc[:,'orig_row_num'] = np.arange(len(epochs))
     epochs.reset_index(inplace=True)
-    epochs.set_index(['QUICK_OBJECT_ID', 'EXPNUM'], inplace=True)
+    epochs.set_index([objid, 'EXPNUM'], inplace=True)
     epochs.sort_index(inplace=True)
 
     # Objects are considered single until set otherwise
@@ -210,8 +216,8 @@ def split_qcat(qcat):
         epochs.loc[merged, 'SPLIT_FLAG'] = 'merged'
 
     to_split = epochs.query("SPLIT_FLAG=='doubled'").copy()
-    split = split_doubles(to_split)
-    
+    split = split_doubles(to_split,objid=objid)
+
     unsplit = epochs.query("SPLIT_FLAG!='doubled'")
     epochs = pd.concat([split, unsplit])
     epochs.sort_values(by='orig_row_num', inplace=True)

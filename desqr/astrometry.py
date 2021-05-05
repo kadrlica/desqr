@@ -2,6 +2,8 @@
 import glob
 import os
 from os.path import join
+import logging
+
 import yaml
 import matplotlib
 if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
@@ -32,6 +34,7 @@ from catalog import good_objects
 
 COLUMNS = [OBJECT_ID,'RA','DEC']
 
+# Catalogs to be accessed from Vizier
 CATALOGS = odict([
         ('2MASS',dict(catalog='II/246/out',
                       columns=['2MASS','_RAJ2000','_DEJ2000','Jmag'])
@@ -42,12 +45,11 @@ CATALOGS = odict([
                       #,'pmRA','e_pmRA','pmDE','e_pmDE'],
                       #column_filters={})
          ),
-        ('GAIA',dict(catalog='I/337/gaia',
+        ('GAIA-DR1',dict(catalog='I/337/gaia',
                      columns=['Source','_RAJ2000','_DEJ2000','<Gmag>'])
                      #,'pmRA','e_pmRA','pmDE','e_pmDE'],
                      #column_filters={})
          ),
-
         ])
 
 def hist_peak(bins,num):
@@ -60,12 +62,12 @@ def draw_angsep(sep,**kwargs):
     kwargs.setdefault('bins',np.linspace(0,250,101))
     kwargs.setdefault('histtype','step')
     kwargs.setdefault('lw',1.5)
-    kwargs.setdefault('normed',True)
+    kwargs.setdefault('density',True)
 
     ax = plt.gca()
     n,b,p = ax.hist(sep,**kwargs)
     ax.set_xlabel("Angular Separation (mas)")
-    if kwargs.get('normed'):
+    if kwargs.get('density'):
         ax.set_ylabel("Normalized Counts")
     else:
         ax.set_ylabel("Counts")
@@ -87,9 +89,9 @@ def draw_astrometry_pixel(skymap,**kwargs):
     ax = plt.gca()
     plt.colorbar(im,label=r'Median Angular Separation (mas)')
 
-def draw_astrometry_footprint(skymap,**kwargs):
+def draw_astrometry_footprint(skymap,survey=None,**kwargs):
     """ skymap in units of mas """
-    im = plotting.draw_survey(skymap,**kwargs)
+    im = plotting.draw_survey(skymap,survey,**kwargs)[0]
     ax = plt.gca()
     plt.colorbar(im,label=r'Median Angular Separation (mas)')
 
@@ -101,9 +103,11 @@ def draw_astrometry_hist(skymap,**kwargs):
     ax = plt.gca()
     ax.set_xlabel('Median Separation (mas)')
 
-def external_astrometry(catfile,catalog='2MASS',nside=64,band='r',plot=False):
+def external_astrometry(catfile,catalog='GAIA',nside=64,band='r',plot=False):
     #nice = os.nice(0)
     #os.nice(10-nice)
+
+    if band=='all': band = 'r'
 
     if not os.path.exists(catfile): 
         msg = "Couldn't find %s"%catfile
@@ -124,7 +128,7 @@ def external_astrometry(catfile,catalog='2MASS',nside=64,band='r',plot=False):
 
     #print "Getting coadd catalog: DES"
     cat = load_infiles([catfile],columns)
-    # Select stars with 17 < mag < 21
+    # Select stars with 16 < mag < 21
     sel = (np.fabs(cat[spread])<0.002) & \
         (cat[mag]>16) & \
         (cat[mag]<21) & \
@@ -137,8 +141,10 @@ def external_astrometry(catfile,catalog='2MASS',nside=64,band='r',plot=False):
         return np.array([],dtype=int), np.array([])
 
     #print "Getting external catalog: %s"%catalog
-    ext = get_local_catalog(ra,dec,radius,**CATALOGS[catalog])
-    #ext = get_vizier_catalog(ra,dec,radius,**CATALOGS[catalog])
+    if catalog in list(CATALOGS.keys()):
+        ext = get_vizier_catalog(ra,dec,radius,**CATALOGS[catalog])
+    else:
+        ext = get_local_catalog(ra,dec,radius,catalog)
 
     m = match_query(cat['RA'],cat['DEC'],ext['_RAJ2000'],ext['_DEJ2000'])
 
@@ -169,8 +175,24 @@ def external_astrometry(catfile,catalog='2MASS',nside=64,band='r',plot=False):
     return upix,peak
 
 def internal_astrometry(catfile,hpxfile,nside=128,band='r',plot=False):
+    """ Calculate internal relative astrometry.
+
+    Parameters
+    ----------
+    catfile : merged catalog file
+    hpxfile : single epoch catalog file(s)
+    nside   : nside for calculation
+    band    : band to use
+    plot    : plot output
+
+    Returns
+    -------
+    stats   : output statistics
+    """
     nice = os.nice(0)
     os.nice(10-nice)
+
+    if band=='all': band = 'r'
 
     #print catfile,hpxfile,nside
 
@@ -201,7 +223,7 @@ def internal_astrometry(catfile,hpxfile,nside=128,band='r',plot=False):
     hpx = hpx[np.in1d(hpx[OBJECT_ID],cat[OBJECT_ID])]
 
     if len(hpx) == 0:
-        print "WARNING: No matched objects in: %s"%hpxfile
+        print("WARNING: No matched objects in: %s"%hpxfile)
         return np.array([],dtype=int), np.array([])
         
     #keyfile = 'key/key_hpx_%05d.fits'%pix
@@ -215,7 +237,7 @@ def internal_astrometry(catfile,hpxfile,nside=128,band='r',plot=False):
 
     uid,inv,cts = np.unique(hpx[OBJECT_ID],False,True,True)
 
-    # Make sure that the order matches between coadd and se.
+    # Make sure that the order matches between coadd and single epoch.
     if not np.all(uid == cat[OBJECT_ID]):
         cat = cat[np.in1d(cat[OBJECT_ID],hpx[OBJECT_ID])]
     if not np.all(uid == cat[OBJECT_ID]):
@@ -253,7 +275,7 @@ def distance(args,plot=False):
         msg = "Couldn't find %s"%catfile
         raise Exception(msg)
 
-    print catfile
+    print(catfile)
 
     columns = [OBJECT_ID,'RA','DEC']
 
@@ -265,7 +287,7 @@ def distance(args,plot=False):
     cat = cat[sel]
 
     if len(cat) == 0:
-        print "WARNING: No catalog objects passing selection"
+        print("WARNING: No catalog objects passing selection")
         return np.array([],dtype=int), np.array([])
 
     ra,dec = cat['RA'],cat['DEC']
@@ -295,10 +317,12 @@ if __name__ == "__main__":
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-n','--nside',default=128,type=int)
     parser.add_argument('-p','--pix',default=None,type=int,action='append')
-    parser.add_argument('-b','--band',action='append',choices=BANDS)
+    parser.add_argument('-b','--band',action='append',choices=BANDS+['all'])
     parser.add_argument('--type',choices=['internal','external'],default='external')
     parser.add_argument('--catalog',choices=CATALOGS.keys(),default='GAIA')
     opts = parser.parse_args()
+
+    if opts.verbose: logging.getLogger().setLevel(logging.DEBUG)
 
     if not opts.band: opts.band = BANDS
 
@@ -316,11 +340,12 @@ if __name__ == "__main__":
     if opts.type == 'external':
         outbase += '_%s'%(opts.catalog.lower())
 
-    skymaps = odict()
+    hpxmaps = odict()
 
     for band in opts.band:
-        print 'Calculating astrometry for %s-band...'%band
-        hpxdir = join(config['hpxdir'],band)
+        print('Calculating astrometry for %s-band...'%band)
+
+        hpxdir = join(config['hpxdir'],'*' if band=='all' else band)
          
         if opts.pix is not None:
             pixels = sorted([p for p in opts.pix if len(glob.glob(catdir+'/*%05d.fits'%p))])
@@ -332,19 +357,21 @@ if __name__ == "__main__":
             raise Exception(msg)
          
         catfiles = [glob.glob(catdir+'/*%05d.fits'%p)[0] for p in pixels]
-        hpxfiles = [glob.glob(hpxdir+'/*%05d.fits'%p)[0] for p in pixels]
+        hpxfiles = [glob.glob(hpxdir+'/*%05d.fits'%p) for p in pixels]
          
         #catfiles = ['cat/y1a1_gold_1_0_2_01376.fits']
         #hpxfiles = ['hpx/i/hpx_i_01376.fits']
          
         # Args must be tuple
-        print "Processing %i files..."%len(catfiles)
+        print("Processing %i files..."%len(catfiles))
          
         if opts.type == 'internal':
+            print('Calculating internal astrometry...')
             args = zip(catfiles,hpxfiles)
             kwargs = dict(nside=opts.nside,band=band)
             astrometry = internal_astrometry
         elif opts.type == 'external':
+            print('Calculating external astrometry relative to %s...'%opts.catalog)
             args = zip(catfiles,)
             kwargs = dict(nside=opts.nside,band=band,catalog=opts.catalog.upper())
             astrometry = external_astrometry
@@ -357,7 +384,7 @@ if __name__ == "__main__":
         hpxmap = blank(nside)
          
         if None in results:
-            print "WARNING: %i processes failed..."%results.count(None)
+            print("WARNING: %i processes failed..."%results.count(None))
         for pix,peak in [r for r in results if r is not None]:
             hpxmap[pix] = peak
          
@@ -366,16 +393,17 @@ if __name__ == "__main__":
 
         outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
         print("Writing %s..."%outfile)
-        healpy.write_map(outfile,hpxmap)
+        healpy.write_map(outfile,hpxmap,overwrite=True)
 
         q = [5,50,95]
         p = np.percentile(hpxmap.compressed(),q)
-        print "Global Median Angular Separation:"
-        print '%s (%s%%)'%(p,q)
-         
-    print '|_. Band |_. Median Separation Map |_. Median Separation Distribution |_. Astrometric Precision |'
+        print("Global Median Angular Separation:")
+        print('%s (%s%%)'%(p,q))
+
     template = '|_. %(band)s |{{thumbnail(%(map)s, size=300)}}|{{thumbnail(%(hist)s, size=300)}}|_. %(value)s mas |'
-            
+    table = '|_. Band |_. Median Separation Map |_. Median Separation Distribution |_. Astrometric Precision |'
+    print(table)
+
     for band,hpxmap in hpxmaps.items():
         out = dict(band=band)
          
@@ -384,38 +412,38 @@ if __name__ == "__main__":
          
             plt.figure()
             draw_astrometry_pixel(hpxmap)
-            plt.title(opts.title+" (%i; %s-band)"%(pix,band))
+            plt.title(opts.title+" (%i; %s)"%(pix,band),y=1.05)
             outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_car.png'%(band,pix,nside))
             plt.savefig(outfile,bbox_inches='tight')
             out['map'] = os.path.basename(outfile)
          
             kwargs['plot']=True
             utils.multiproc(astrometry,args,kwargs)
-            plt.title(opts.title+" (%i; %s-band)"%(pix,band))
+            plt.title(opts.title+" (%i; %s)"%(pix,band))
             outfile = join(outdir,outbase+'_%s_hpx%05d_n%i_hist.png'%(band,pix,nside))
             plt.savefig(outfile,bbox_inches='tight')
             out['hist'] = os.path.basename(outfile)
          
             outfile = join(outdir,outbase+'_%s_hpx%05d_n%i.fits'%(band,pix,nside))
-            healpy.write_map(outfile,hpxmap)
+            healpy.write_map(outfile,hpxmap,overwrite=True)
          
         else:
             plt.figure()
-            draw_astrometry_footprint(hpxmap)
-            plt.title(opts.title+" (%s-band)"%band)
+            draw_astrometry_footprint(hpxmap,survey=config.get('survey'))
+            plt.title(opts.title+" (%s)"%band)
             outfile = join(outdir,outbase+'_%s_n%i_car.png'%(band,nside))
             plt.savefig(outfile,bbox_inches='tight')
             out['map'] = os.path.basename(outfile)
          
             plt.figure()
-            draw_astrometry_hist(hpxmap,bins=np.linspace(0,500,101))
-            plt.title(opts.title+" (%s-band)"%band)
+            draw_astrometry_hist(hpxmap,bins=np.linspace(0,100,101))
+            plt.title(opts.title+" (%s)"%band)
             outfile = join(outdir,outbase+'_%s_n%i_hist.png'%(band,nside))
             plt.savefig(outfile,bbox_inches='tight')
             out['hist'] = os.path.basename(outfile)
          
             outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
-            healpy.write_map(outfile,hpxmap)
+            healpy.write_map(outfile,hpxmap,overwrite=True)
 
 
         q = [5,50,95]
@@ -423,6 +451,9 @@ if __name__ == "__main__":
         out['value'] = '/'.join(['%.0f'%_p for _p in p])
         out['percentile'] = '/'.join(['%.0f'%_q for _q in q])
         outstr = template%out
-        print outstr
+        table += '\n' + outstr
+        print(outstr)
 
+    print(30*'-')
+    print(table)
     plt.ion()

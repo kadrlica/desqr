@@ -172,17 +172,61 @@ def gaia_photometry(catfile,nside=64,band=None,plot=False):
         
     return upix,stat
 
+def rms_photometry(catfile,nside=64,band=None,plot=False):
+    """ Calculate photometric repeatability """
+    if not os.path.exists(catfile): 
+        msg = "Couldn't find %s"%catfile
+        raise Exception(msg)
+
+    columns = ['RA','DEC']
+    spread,nepochs = bfields(['WAVG_SPREAD_MODEL','NEPOCHS'],band)
+    mag,magerr,magrms = bfields(['WAVG_MAG_PSF','WAVG_MAGERR_PSF','WAVG_MAGRMS_PSF'],band)
+    columns += [spread, nepochs, mag, magerr, magrms]
+
+    # Hack to get pixel location
+    hpx = int(catfile.split('_')[-1].split('.')[0])
+    #hpx = ang2pix(NSIDE, cat['RA'], cat['DEC'])
+    ra,dec = pix2ang(NSIDE, hpx)
+    msg = '%s (RA,DEC) = %.2f,%.2f'%(os.path.basename(catfile),ra,dec)
+    print(msg)
+
+    #print "Getting coadd catalog: DES"
+    cat = load_infiles([catfile],columns)
+    # Select stars with 16 < r < 20 and 0.0 < (g-i) < 1.5
+    sel = (np.fabs(cat[spread]) < 0.002) & \
+          (cat[mag] > 16) & (cat[mag] < 18) &\
+          (cat[magrms] < 90) &\
+          (cat[nepochs] > 1)
+    cat = cat[sel]
+
+    if len(cat) == 0:
+        msg = "WARNING: No objects passing selection in: %s"%catfile
+        print(msg)
+        return np.array([],dtype=int), np.array([])
+
+    pix = ang2pix(nside,cat['RA'],cat['DEC'])
+    upix = np.unique(pix)
+    stat = nd.median(cat[magrms],labels=pix,index=upix)
+
+    if False:
+        plt.figure()
+        plt.hist(cat[magrms],bins=50)
+        import pdb; pdb.set_trace()
+        
+    return upix,stat
+
 
 if __name__ == "__main__":
     import argparse
     description = "python script"
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('config',help='Configuration file.')
-    parser.add_argument('-o','--outbase',default='photo')
-    parser.add_argument('-v','--verbose',action='store_true')
+    parser.add_argument('-b','--band',default='r',choices=BANDS)
     parser.add_argument('-n','--nside',default=128,type=int)
+    parser.add_argument('-o','--outbase',default='photo')
     parser.add_argument('-p','--pix',default=None,type=int,action='append')
-    parser.add_argument('-b','--band',default=['r'],action='append',choices=BANDS)
+    parser.add_argument('--type',choices=['gaia','rms'],default='gaia')
+    parser.add_argument('-v','--verbose',action='store_true')
     opts = parser.parse_args()
 
     config = yaml.load(open(opts.config))
@@ -196,52 +240,60 @@ if __name__ == "__main__":
 
     outdir = mkdir('release/photometry')
     outbase = opts.outbase
-    outbase += '_gaia'
+    band = opts.band
 
     hpxmaps = odict()
 
-    for band in opts.band:
-        print('Calculating photometry for %s-band...'%band)
+    print('Calculating photometry for %s-band...'%band)
 
-        if opts.pix is not None:
-            pixels = sorted([p for p in opts.pix if len(glob.glob(catdir+'/*%05d.fits'%p))])
-        else:
-            pixels = sorted([p for p in range(npix) if len(glob.glob(catdir+'/*%05d.fits'%p))])
-         
-        if len(pixels) == 0:
-            msg = "Invalid pixel: %s"%opts.pix
-            raise Exception(msg)
-         
-        catfiles = [glob.glob(catdir+'/*%05d.fits'%p)[0] for p in pixels]
-        #catfiles = ['cat/y1a1_gold_1_0_2_01376.fits']
-         
-        # Args must be tuple
-        print("Processing %i files..."%len(catfiles))
+    if opts.pix is not None:
+        pixels = sorted([p for p in opts.pix if len(glob.glob(catdir+'/*%05d.fits'%p))])
+    else:
+        pixels = sorted([p for p in range(npix) if len(glob.glob(catdir+'/*%05d.fits'%p))])
+     
+    if len(pixels) == 0:
+        msg = "Invalid pixel: %s"%opts.pix
+        raise Exception(msg)
+     
+    catfiles = [glob.glob(catdir+'/*%05d.fits'%p)[0] for p in pixels]
+    #catfiles = ['cat/y1a1_gold_1_0_2_01376.fits']
+     
+    # Args must be tuple
+    print("Processing %i files..."%len(catfiles))
 
-        print('Calculating photometric offsets...')
-        args = zip(catfiles)
-        kwargs = dict(nside=opts.nside,band=band)
+    print('Calculating photometric offsets...')
+    args = zip(catfiles)
+    kwargs = dict(nside=opts.nside,band=band)
+
+    if opts.type == 'gaia':
         func = gaia_photometry
+        outbase += '_gaia'
+    elif opts.type == 'rms':
+        func = rms_photometry
+        outbase += '_rms'
+    else:
+        msg = "Unrecognized type: %s"%args.type
+        raise Exception(msg)
 
-        results = utils.multiproc(func,args,kwargs)
-        #results = [func(*a,**kwargs) for a in args]
-         
-        hpxmap = blank(nside)
-         
-        if None in results:
-            print("WARNING: %i processes failed..."%results.count(None))
-        for pix,stat in [r for r in results if r is not None]:
-            hpxmap[pix] = stat
-         
-        hpxmap = np.ma.MaskedArray(hpxmap,np.isnan(hpxmap),fill_value=np.nan)
-        hpxmaps[band] = hpxmap
+    results = utils.multiproc(func,args,kwargs)
+    #results = [func(*a,**kwargs) for a in args]
+     
+    hpxmap = blank(nside)
+     
+    if None in results:
+        print("WARNING: %i processes failed..."%results.count(None))
+    for pix,stat in [r for r in results if r is not None]:
+        hpxmap[pix] = stat
+     
+    hpxmap = np.ma.MaskedArray(hpxmap,np.isnan(hpxmap),fill_value=np.nan)
+    hpxmaps[band] = hpxmap
 
-        outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
-        print("Writing %s..."%outfile)
-        hp.write_map(outfile,hpxmap,overwrite=True)
+    outfile = join(outdir,outbase+'_%s_n%i.fits'%(band,nside))
+    print("Writing %s..."%outfile)
+    hp.write_map(outfile,hpxmap,overwrite=True)
 
-        q = [5,50,95]
-        p = np.percentile(hpxmap.compressed(),q)
-        print("Global Median Photometry:")
-        print('%s (%s%%)'%(p,q))
+    q = [5,50,95]
+    p = np.percentile(hpxmap.compressed(),q)
+    print("Global Median Photometry:")
+    print('%s (%s%%)'%(p,q))
     plt.ion()

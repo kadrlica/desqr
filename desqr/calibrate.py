@@ -411,6 +411,7 @@ if __name__ == "__main__":
 
     status = 0
     for exp in explist:
+        logging.info("(%s/%s): %s "%(i,len(explist),exp['expnum']))
 
         TAG = exp['tag'] if args.tag is None else args.tag
 

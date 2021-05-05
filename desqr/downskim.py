@@ -14,23 +14,24 @@ import pandas as pd
 import numpy as np
 import fitsio
 
-from utils import mkdir
-from const import BANDS, TAGS
+try:
+    from utils import mkdir, isstring
+    from const import BANDS, TAGS
+except ModuleNotFoundError:
+    from .utils import mkdir, isstring
+    from .const import BANDS, TAGS
 
-#from archive.dexp import ObjectsTable
 
-#bliss_temp = '/export/data/des50.b/data/BLISS/{dirname}/{expnum}/D00{expnum}_*_fullcat.fits'
 des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}'
 des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}'
 des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}'
+des70 = '/data/des70.c/data/BLISS/{dirname}/{expnum}'
 filebase = 'D00{expnum}_*_fullcat.fits'
 
-bliss_des50 = os.path.join(des50,filebase)
-bliss_des60 = os.path.join(des60,filebase)
-bliss_des61 = os.path.join(des61,filebase)
-PATHS = [bliss_des50, bliss_des60, bliss_des61]
+PATHS = [os.path.join(dirname,filebase) for dirname in [des70,des50,des60,des61]]
 
-outtemp = '%(unitname)s_%(band)s.fits'
+#print("WARNING: NGC55 hack")
+#PATHS = ['/home/s1/kadrlica/projects/delve/deep/v1/data/{dirname}/{expnum}/D00{expnum}_*-fullcat.fits']
 
 DTYPES = [('FILENAME', 'S48'), ('PFW_ATTEMPT_ID', '>i8'), ('TAG', 'S13'), ('UNITNAME', 'S9'), ('REQNUM', '>i4'), ('ATTNUM', '>i2'), ('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('FLAGS', '>i2'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'),('IMAFLAGS_ISO','>i2'),('MJD_OBS','>f8'),('EXPTIME','>f4')]
 TAG = ''
@@ -48,23 +49,28 @@ def get_filenames(expnum,path=None):
 
     for path in paths:
         filenames = glob.glob(path.format(**params))
-        if filenames: break
+        if filenames: 
+            msg = "Found files in path: %s"%(os.path.dirname(filenames[0]))
+            logging.debug(msg)
+            break
 
     if not filenames:
         msg = "File not found for: " + str(params)
         for path in paths:
             msg += '\n'+path.format(**params)
-        #msg += '\n'+bliss_des50.format(**params)
-        #msg += '\n'+bliss_des60.format(**params)
-        #msg += '\n'+bliss_des61.format(**params)
         raise IOError(msg)
     return filenames
     
 def bliss_select(data):
+    """ Quick catalog object selection """
+    # Require PSF and AUTO measurements
     sel = data['FLUX_PSF'] > 0
     sel &= data['FLUX_AUTO'] > 0
+    # Not saturated, but blends and neighbors ok
     sel &= data['FLAGS'] < 4
+    # No "bad" imaflags_iso
     sel &= (data['IMAFLAGS_ISO'] & 2047) == 0 
+    # MAGERR_PSF < 0.5 (PSF S/N > 2.17)
     olderr = np.seterr(invalid='ignore',divide='ignore')
     sel &= 1.0857362*(data['FLUXERR_PSF']/data['FLUX_PSF']) < 0.5
     np.seterr(**olderr)
@@ -72,6 +78,17 @@ def bliss_select(data):
 
 maglites_select = bliss_select
 delve_select = bliss_select
+
+def fgcm_select(data):
+    """ Catalog selection for input to FGCM """
+    sel = data['FLUX_PSF'] > 0
+    sel &= data['FLAGS'] < 4
+    sel &= (data['IMAFLAGS_ISO'] & 2047) == 0 
+
+    olderr = np.seterr(invalid='ignore',divide='ignore')
+    sel &= data['FLUX_PSF']/data['FLUXERR_PSF'] > 5
+    np.seterr(**olderr)
+    return sel
     
 def create_output(data,exp,dtype=DTYPES):
     out = np.recarray(len(data),dtype=dtype)
@@ -85,7 +102,8 @@ def create_output(data,exp,dtype=DTYPES):
             out[n] = data[n]
 
         # Fill some columns from exp
-        if n in ['PFW_ATTEMPT_ID','TAG','UNITNAME','REQNUM','ATTNUM','T_EFF','TAG']:
+        if n in ['PFW_ATTEMPT_ID','TAG','UNITNAME','REQNUM','ATTNUM','T_EFF']:
+            if n not in map(str.upper,exp.dtype.names): continue
             try:               out[n] = exp[n]
             except ValueError: out[n] = exp[n.lower()]
 
@@ -108,29 +126,33 @@ def create_catalog(filename,dtype=DTYPES,tag=TAG):
         if name not in data.dtype.names: continue
         cat[name] = data[name]
 
-            
-    cat['FILENAME'] = os.path.basename(filename)
-    cat['PFW_ATTEMPT_ID'] = int(str(hdr['EXPNUM'])+'01')
-    cat['TAG'] = tag 
-    cat['UNITNAME'] = 'D%08d'%hdr['EXPNUM']
-    cat['REQNUM'] = 1
-    cat['ATTNUM'] = 1
-    cat['EXPNUM'] = hdr['EXPNUM']
-    cat['CCDNUM'] = hdr['CCDNUM']
-    cat['BAND'] = hdr['BAND']
-    cat['EXPTIME'] = hdr['EXPTIME']
-    cat['MJD_OBS'] = hdr['MJD-OBS']
-    cat['T_EFF'] = -1
-    cat['RA'] = data['ALPHAWIN_J2000']
-    cat['DEC'] = data['DELTAWIN_J2000']
-    cat['OBJECT_NUMBER'] = data['NUMBER']
-    cat['BAND'] = hdr['FILTER']
+    # Mapping names...
+    names = cat.dtype.names
+
+    # Header names
+    for name in ['EXPNUM','CCDNUM','BAND','EXPTIME']:
+        cat[name] = hdr[name]
+    if 'BAND' in names:     cat['BAND'] = hdr['FILTER']
+
+    # Other names
+    if 'FILENAME' in names: cat['FILENAME'] = os.path.basename(filename)
+    if 'PFW_ATTEMPT_ID' in names: cat['PFW_ATTEMPT_ID'] = int(str(hdr['EXPNUM'])+'01')
+    if 'TAG' in names:      cat['TAG'] = tag 
+    if 'UNITNAME' in names: cat['UNITNAME'] = 'D%08d'%hdr['EXPNUM']
+    if 'REQNUM' in names:   cat['REQNUM'] = 1
+    if 'ATTNUM' in names:   cat['ATTNUM'] = 1
+    if 'MJD_OBS' in names:  cat['MJD_OBS'] = hdr['MJD-OBS']
+    if 'T_EFF' in names:    cat['T_EFF'] = -1
+    if 'RA' in names:       cat['RA'] = data['ALPHAWIN_J2000']
+    if 'DEC' in names:      cat['DEC'] = data['DELTAWIN_J2000']
+    if 'OBJECT_NUMBER' in names: cat['OBJECT_NUMBER'] = data['NUMBER']
+
     return cat
 
 def create_header(fits):
     from astropy.io.fits import Header
 
-    if isinstance(fits,basestring):
+    if isstring(fits):
         fits = fitsio.FITS(fits)
 
     hdrstr = '\n'.join(fits['LDAC_IMHEAD'].read()[0][0])

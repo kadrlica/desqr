@@ -27,59 +27,63 @@ if __name__ == "__main__":
     sections = args.run if args.run else SECTIONS
     path = os.path.dirname(os.path.abspath(__file__))
 
+    survey = config.get('survey','des')
+
     if 'footprint' in sections:
         exe = os.path.join(path,'footprint.py')
-        survey = config.get('survey','des')
         nside = 2048 if args.nside is None else args.nside
         cmd = 'python %s %s -p -n %i --survey %s'%(exe,args.config,nside,survey)
         if args.verbose: cmd += ' -v'
         if args.band: bands = args.band
         else:         bands = config['bands'] + [''.join(config['bands'])]
         cmd += ' '+' '.join(['-b '+b for b in bands])
-        if args.queue == 'local':
-            print cmd
-            submit = cmd
-        else:
-            submit = 'csub %s'%(cmd)
 
+        submit = 'csub -q %s %s'%(args.queue, cmd)
         subprocess.call(submit,shell=True)
         
     if 'depth' in sections:
-        nside = 1024 if args.nside is None else args.nside
         exe = os.path.join(path,'depth.py')
-        cmd = 'python %s %s -n %i'%(exe,args.config,nside)
+        nside = 1024 if args.nside is None else args.nside
+        snr = 10
+        mag = 'psf'
+        cmd = 'python %s %s -n %i --snr %s --survey %s --mag %s'%(exe,args.config,nside,snr,survey,mag)
         if args.verbose: cmd += ' -v'
 
-        if args.queue == 'local':
-            print cmd
-            submit = cmd
-        else:
-            submit = 'csub %s'%(cmd)
-
+        submit = 'csub -q %s %s'%(args.queue,cmd)
         subprocess.call(submit,shell=True)
 
     if 'astrometry' in sections:
+        """ Calculate internal/external astrometry """
         exe = os.path.join(path,'astrometry.py')
         # r-band only
         if args.band: bands = args.band
         else:         bands = ['r']
-        
+
         cmd = 'python %s %s'%(exe,args.config)
+        if args.verbose: cmd += ' -v'
+        # Internal or external astrometry?
+        cmd += ' --type internal'
+        #cmd += ' --type external'
+
         cmd += ' '+' '.join(['-b '+b for b in bands])
 
-        if args.verbose: cmd += ' -v'
-
-        if args.queue == 'local':
-            print cmd
-            submit = cmd
-        else:
-            submit = 'csub %s'%(cmd)
-
+        submit = 'csub -q %s %s'%(args.queue,cmd)
         subprocess.call(submit,shell=True)
 
+    if 'photometry' in sections:
+        """ Compare photometry """
+        exe = os.path.join(path,'photometry.py')
 
-    #if 'astrometry' in sections:
-    #    exe = os.path.join(path,'astrometry')
-    #    cmd = 'python %s'%exe
+        # r-band only
+        bands = ['r']
+
+        for b in bands:
+            cmd = 'python %s %s -b %s'%(exe,args.config,b)
+            #cmd += ' --type gaia'
+            cmd += ' --type rms'
+            if args.verbose: cmd += ' -v'
+
+            submit = 'csub -q %s %s'%(args.queue,cmd)
+            subprocess.call(submit,shell=True)
 
     

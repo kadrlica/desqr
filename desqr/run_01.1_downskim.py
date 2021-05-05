@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+""" Downskim exposures to disk """
 import os
 import yaml
 import subprocess
@@ -10,15 +11,8 @@ from utils import mkdir
 import download
 
 if __name__ == "__main__":
-    import argparse
-    description = "downskim exposures to disk"
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config')
-    parser.add_argument('-f','--force',action='store_true')
-    parser.add_argument('-s','--sleep',default=0,type=float)
-    parser.add_argument('-n','--njobs',default=24,type=int)
-    parser.add_argument('-q','--queue',default='vanilla')
-    parser.add_argument('-v','--verbose',action='store_true')
+    from parser import Parser
+    parser = Parser(description=__doc__)
     args = parser.parse_args()
 
     config = yaml.load(open(args.config))
@@ -26,10 +20,12 @@ if __name__ == "__main__":
     explist = config['explist']
     tags = config.get('tags')
     section = config.get('db','bliss')
+    basename = config.get('rawbase','D{expnum:08d}_{band:s}_cat.fits')
     
     if os.path.exists(explist) and not args.force:
-        print "Found %s; skipping download..."%explist
+        print("Found %s; skipping download..."%explist)
     else:
+        print("Didn't find %s; downloading..."%explist)
         query = download.exposure_query(tags)
         print query
         sqlfile = os.path.splitext(explist)[0]+'.sql'
@@ -43,11 +39,13 @@ if __name__ == "__main__":
             if (tags is not None) and (exp['tag'] not in tags):
                 print("No exposures with tag '%s'"%tags)
                 continue
-            unitname = 'D%08d'%(exp['expnum'])
-            outbase = 'D%(expnum)08d_%(band)s_cat.fits'%(exp)
+
+            #outbase = basename%(exp)
+            edict = dict(zip(exp.dtype.names,exp))
+            outbase = basename.format(**edict)
             outfile = os.path.join(outdir,outbase)
             if os.path.exists(outfile) and not args.force:
-                print 'Found %s; skipping...'%outfile
+                print('Found %s; skipping...'%outfile)
                 continue
 
             logfile = os.path.join(logdir,outbase.replace('.fits','.log'))
@@ -60,11 +58,7 @@ if __name__ == "__main__":
             submit = 'csub -q %s -o %s '%(args.queue, logfile)
             if args.njobs: submit += '-n %s '%args.njobs
             submit += cmd
-            if args.verbose: print submit
-            subprocess.call(submit,shell=True)
+            if args.verbose: print(submit)
+            if not args.dryrun: subprocess.call(submit,shell=True)
             time.sleep(args.sleep)
-
-            #break
-        #break
-        #time.sleep(300)
         

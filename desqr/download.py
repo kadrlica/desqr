@@ -643,7 +643,7 @@ def or_download(outfile,query,sqlfile=None,section='desoper',force=False):
     sql.write('\n'+'> %s \n'%outfile)
     sql.close()
     
-    print cmd
+    print(cmd)
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
 
@@ -668,7 +668,7 @@ def pg_download(outfile,query,sqlfile=None,section='BLISS',force=False):
     sql.write("\n) to STDOUT WITH CSV HEADER DELIMITER ','; \n")
     sql.close()
 
-    print cmd
+    print(cmd)
     subprocess.call(cmd,shell=True)
     if remove: os.remove(sqlfile)
 

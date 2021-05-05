@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 import shutil
 import os
-from collections import OrderedDict as odict
 import itertools
+import glob
+from collections import OrderedDict as odict
 
 import numpy as np
 import fitsio
@@ -203,7 +204,7 @@ def ccdnum2(infile,outfile=None,force=True):
     names = np.char.upper(f[1].columns.names).tolist()
 
     if 'CCDNUM' in names:
-        print 'CCDNUM column already found; skipping...'
+        print('CCDNUM column already found; skipping...')
         return
 
     if outfile is None: outfile = infile
@@ -224,7 +225,7 @@ def ccdnum2(infile,outfile=None,force=True):
             ])
     hdu = pyfits.BinTableHDU.from_columns(d.columns[:idx+1]+coldefs+d.columns[idx+1:])
 
-    print "Writing %s..."%outfile
+    print("Writing %s..."%outfile)
     hdu.writeto(outfile,clobber=force)
 
 
@@ -240,7 +241,7 @@ def ccdnum(infile,outfile=None,force=True):
     if outfile != infile: shutil.copy(infile,outfile)
 
     if 'CCDNUM' in names:
-        print 'CCDNUM column already found; skipping...'
+        print('CCDNUM column already found; skipping...')
         f.close()
         return
 
@@ -255,7 +256,7 @@ def ccdnum(infile,outfile=None,force=True):
                       dtype=int)
     idx = names.index('EXPNUM');
 
-    print "Writing %s..."%outfile
+    print("Writing %s..."%outfile)
     f[1].insert_column('CCDNUM',ccdnum,colnum=idx+1)
     f.close()
 
@@ -267,7 +268,8 @@ def load(args):
 
 def load_infiles2(infiles,columns=None,multiproc=False):
     #logger = logging.getLogger()
-    if isinstance(infiles,basestring):
+    
+    if isstring(infiles):
         infiles = [infiles]
 
     logger.debug("Loading %s files..."%len(infiles))
@@ -296,7 +298,7 @@ def load_infiles2(infiles,columns=None,multiproc=False):
 
 def load_infiles(infiles,columns=None,multiproc=False):
     #logger = logging.getLogger()
-    if isinstance(infiles,basestring):
+    if isstring(infiles):
         infiles = [infiles]
 
     logger.debug("Loading %s files..."%len(infiles))
@@ -321,6 +323,37 @@ def load_infiles(infiles,columns=None,multiproc=False):
     logger.debug('Concatenating arrays...')
     return np.concatenate(out)
 
+def get_pixels(dirname,filename=None):
+    """ Get array of exising pixel/filenames in a directory
+
+    Parameters
+    ----------
+    dirname  : directory
+    filename : filename base
+
+    Returns
+    -------
+    array : healpix pixels and filenames
+    """
+    filenames = None
+
+    if filename:
+        filenames = glob.glob(os.path.join(dirname,filename))
+        if not filenames: raise Exception("No files found.")
+
+    if not filenames:
+        filenames = glob.glob(os.path.join(dirname,'*.fits'))
+    if not len(filenames):
+        filenames = glob.glob(os.path.join(dirname,'*.fits.fz'))
+    if not len(filenames):
+        filenames = glob.glob(os.path.join(dirname,'*.csv'))
+
+    filenames = sorted(filenames)
+    basename = np.char.partition(filenames,'_')[:,0]
+    pixels = np.char.partition(basename,'.')[:,0].astype(int)
+    array = np.rec.fromarrays([pixels,filenames],names=['pixel','filename'])
+    return array
+
 
 def uid(expnum,ccdnum):
     return expnum + ccdnum/100.
@@ -331,6 +364,7 @@ def ruid(uid):
     ccdnum = np.round(100 * (uid%1)).astype(int)
     return expnum,ccdnum
 
+# Not necessary anymore (pushed upstream to healpy)
 def pix2ang(nside, pix, nest=False):
     """
     Return (lon, lat) in degrees instead of (theta, phi) in radians
@@ -425,22 +459,43 @@ def get_vizier_catalog(ra,dec,radius=None,**kwargs):
     return tab[0]
 
 def get_local_catalog(ra,dec,radius,catalog,**kwargs):
+    """ Get local catalog from disk 
+
+    Parameters
+    ----------
+    ra : right ascension of catalog pixel (deg)
+    dec: declination of catalog pixel (deg)
+    catalog : catalog name
+    
+    Returns
+    -------
+    cat : object catalog
+    """
     from ugali.utils.healpix import ang2disc
 
     mapping = {}
-    if 'gaia' in catalog:
+    if 'gaia' in catalog.lower():
         nside=32
         dirname = '/data/des40.b/data/gaia/dr2/healpix'
         basename = 'GaiaSource_%05d.fits'
         columns = ['SOURCE_ID','RA','DEC']
         mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
-
-    elif 'atlas-refcat' in catalog:
+    elif 'atlas' in catalog.lower():
         nside = 32
         dirname = '/data/des40.b/data/atlas-refcat2/healpix'
         basename = 'atlas-refcat2_%05d.fits'
         columns = ['OBJID','RA','DEC','G']
         mapping.update({})
+    elif 'ps1' in catalog.lower():
+        nside = 32
+        dirname = '/data/des40.b/data/ps1/dr1/healpix'
+        basename = 'ps1_dr1_%05d.fits'
+        columns = ['RA','DEC']
+    elif 'decals' in catalog.lower():
+        nside = 32
+        dirname = '/data/des40.b/data/decals/dr8/south_healpix'
+        basename = 'decals-dr8-sweep_%05d.fits'
+        columns = ['OBJID','RA','DEC']
     else:
         raise Exception('Unrecognized catalog: %s'%catalog)
 
@@ -456,7 +511,7 @@ def get_local_catalog(ra,dec,radius,catalog,**kwargs):
 
 def print_problem(msg):
     import termcolor as color
-    print color(msg,'red')
+    print(color(msg,'red'))
 
 def set_memory_limit(mlimit):
     """Set the (soft) memory limit for setrlimit.
@@ -473,3 +528,4 @@ def set_memory_limit(mlimit):
     rsrc = resource.RLIMIT_AS
     resource.setrlimit(rsrc, (mlimit, mlimit))
     return resource.getrlimit(rsrc)
+

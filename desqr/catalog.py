@@ -111,6 +111,10 @@ def minimum_index(input,labels,index=None):
 def wavg(values,weights,labels=None,index=None,inverse=None,counts=None):
     # Weighted average:
     # http://en.wikipedia.org/wiki/Weighted_arithmetic_mean
+    # Using the weighted sample variance with reliability weights
+    # Referenced to the GSL:
+    # https://www.gnu.org/software/gsl/doc/html/statistics.html#weighted-samples
+
     if labels is None: 
         labels = np.ones(len(values),dtype=int)
 
@@ -124,9 +128,9 @@ def wavg(values,weights,labels=None,index=None,inverse=None,counts=None):
 
     wavg_err  = nd.maximum(np.sqrt(1/weights),labels=labels,index=index)
 
+    # https://en.wikipedia.org/wiki/Weighted_arithmetic_mean#Reliability_weights
     wavg_rms  = nd.sum(weights*(values - wavg[inverse])**2,
                        labels=labels,index=index)
-
     err = np.seterr()
     np.seterr(all='ignore')
     wavg_rms *= (V1/(V1**2 - V2)) 

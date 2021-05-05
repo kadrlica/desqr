@@ -12,6 +12,8 @@ class Parser(argparse.ArgumentParser):
         super(Parser,self).__init__(*args,**kwargs)
 
         self.add_argument('config')
+        self.add_argument('--dryrun',action='store_true',
+                          help='run in dryrun mode')
         self.add_argument('-f','--force',action='store_true',
                           help='force overwrite')
         self.add_argument('-n','--njobs',default=30,type=int,

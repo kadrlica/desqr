@@ -44,7 +44,7 @@ def select(data,mag,maglim=90):
 
 def count(filename):
     """Count the number of objects passing selections"""
-    print filename
+    print(filename)
     data = fitsio.read(filename,columns=COLUMNS)
     pixels = ang2pix(nside,data['RA'],data['DEC'])
     ret = dict()
@@ -89,7 +89,7 @@ def plot(filename,survey=None,title=None):
     plt.suptitle("Coverage (%s)"%title)
 
     outfile = filename.replace('.fits.gz','.png')
-    print "Writing %s..."%outfile
+    print("Writing %s..."%outfile)
     plt.savefig(outfile,bbox_inches='tight')
     
 
@@ -178,7 +178,7 @@ if __name__ == "__main__":
         out['map'] = ''
 
         outfile = join(outdir,'footprint_%s_n%i_equ.fits.gz'%(name,nside))
-        print "Writing %s..."%outfile
+        print("Writing %s..."%outfile)
         if os.path.exists(outfile): os.remove(outfile)
         hp.write_map(outfile,counts,dtype=int)
 
@@ -188,7 +188,7 @@ if __name__ == "__main__":
 
         outstr += template%out
 
-    print outstr
+    print(outstr)
 
     if args.plot:
         kwargs = dict(bins=np.linspace(1,100,100),histtype='step',lw=1.5)

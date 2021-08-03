@@ -24,6 +24,7 @@ from ugali.utils.healpix import ang2pix, pix2ang
 import ugali.utils.projector
 from ugali.utils.projector import angsep
 from ugali.utils.shell import mkdir
+from ugali.utils.logger import logger
 
 import utils
 from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
@@ -36,9 +37,29 @@ from catalog import good_objects
 
 COLUMNS = [OBJECT_ID,'RA','DEC']
 
-def get_gaia_catalog(hpx,columns=['RA','DEC','PHOT_G_MEAN_FLUX']):
-    dirname = '/data/des40.b/data/gaia/dr2/healpix/'
+def plot(filename,outfile=None):
+    import skymap
+    logger.info("Reading %s..."%filename)
+    hpxmap = hp.read_map(filename)
+    fig = plt.figure(figsize=(8,5))
+    smap = skymap.SurveyMcBryde()
+    smap.draw_hpxmap(hpxmap)
+    plt.colorbar(orientation='horizontal',fraction=0.05,shrink=0.75,
+                 label='MAG RMS')
+    if not outfile: 
+        outfile=os.path.basename(filename).split('.')[0]+'.png'
+    logger.info("Writing %s..."%outfile)
+    plt.savefig(outfile,bbox_inches='tight')
+
+def get_gaia_catalog(hpx,columns=['RA','DEC','PHOT_G_MEAN_FLUX'],version='dr2'):
+    if version == 'dr2':
+        dirname = '/data/des40.b/data/gaia/dr2/healpix/'
+    elif version == 'edr3':
+        dirname = '/data/des40.b/data/gaia/edr3/healpix/'
+    else:
+        raise Exception("Unrecognized Gaia version: %s"%version)
     basename = 'GaiaSource_%05d.fits'
+    #print(dirname)
 
     pixels = [hpx]
     filenames = [os.path.join(dirname,basename%p) for p in pixels]
@@ -47,15 +68,22 @@ def get_gaia_catalog(hpx,columns=['RA','DEC','PHOT_G_MEAN_FLUX']):
     return cat
 
 #def gaia_transform(g,r,i):
-#    """ DES DR1 transformation to Gaia G. """
+#    """ DES DR1 transformation to Gaia G. This is very coarse and should not be used. """
 #    G = r - 0.10020396 + 0.14969636 * (g-i) - 0.01253971 * (g-i)**2 - 0.03451075 * (g-i)**3
 #    return G
 
-def gaia_transform(g,r,i,z):
-    """ From Eli... This complex model behaves about as well as a random forest classifier for Gaia DR2.
-    The magnitude dependence of the transformation is huge because of background errors in Gaia DR2.
+def gaia_transform(g, r, i, z, version='dr2'):
+    """From Eli for FGCM comparisons via Slack:
+    https://darkenergysurvey.slack.com/archives/C016J5SDV9T/p1608182260343200
 
-    This is valid for 0 < g - i < 1.5
+    This complex model behaves about as well as a random forest
+    classifier for Gaia DR2.  The magnitude dependence of the
+    transformation is huge because of background errors in Gaia DR2.
+
+    The EDR3 transformations have a much smaller r-offset curvature
+    due to background issues and should be able to go deeper.
+
+    These transformations are valid for 0 < g - i < 1.5
     """
 
     magConst = 2.5 / np.log(10.0)
@@ -84,16 +112,21 @@ def gaia_transform(g,r,i,z):
     fnuPrime[:, 2] = fudgeFactors[2] * (S[:, 1] + S[:, 2]) / 2.0
     fnuPrime[:, 3] = S[:, 2] + fudgeFactors[3] * ((lambdaStd[3] - lambdaStd[2]) / (lambdaStd[3] - lambdaStd[1])) * (S[:, 2] - S[:, 1])
 
-    # DR2 fit parameters
-    pars = [ 1.43223290e+00,  1.50877061e+00, 8.43173013e-01, -5.99023967e-04, 
-             4.06188382e-01,  3.11181978e-01, 2.51002598e-01,  1.00000000e-05,  
-             4.94284725e-03,  1.80499806e-03]
+    if version=='dr2':
+        # DR2 fit parameters
+        pars = [ 1.43223290e+00,  1.50877061e+00, 8.43173013e-01, -5.99023967e-04, 
+                 4.06188382e-01,  3.11181978e-01, 2.51002598e-01,  1.00000000e-05,  
+                 4.94284725e-03,  1.80499806e-03]
 
-    # EDR3: Notice that the last two parameters (describing the
-    # r-offset curvature due to background issues) are much smaller.
-    #pars = [ 2.61815727e+00,  2.69372875e+00,  1.45644592e+00, -5.99023051e-04,
-    #         3.97535324e-01,  3.15794343e-01,  2.55484718e-01,  1.00000000e-05,
-    #         8.30152817e-04, -3.57980758e-04]
+    elif version=='edr3':
+        # EDR3: Notice that the last two parameters (describing the
+        # r-offset curvature due to background issues) are much smaller.
+        pars = [ 2.61815727e+00,  2.69372875e+00,  1.45644592e+00, -5.99023051e-04,
+                 3.97535324e-01,  3.15794343e-01,  2.55484718e-01,  1.00000000e-05,
+                 8.30152817e-04, -3.57980758e-04]
+
+    else:
+        raise Exception("Unrecognized Gaia version: %s"%version)
 
     i10g,i10r,i10i,i10z = pars[0:4]
     kg,kr,ki,kz = pars[4:8]
@@ -107,7 +140,7 @@ def gaia_transform(g,r,i,z):
     mGDES += r1 * (rMag - 17.0) + r2 * (rMag - 17.0)**2.
     return mGDES
 
-def gaia_photometry(catfile,nside=64,band=None,plot=False):
+def gaia_photometry(catfile,nside=64,band=None,plot=False,version='edr3'):
     if not os.path.exists(catfile): 
         msg = "Couldn't find %s"%catfile
         raise Exception(msg)
@@ -145,7 +178,7 @@ def gaia_photometry(catfile,nside=64,band=None,plot=False):
         return np.array([],dtype=int), np.array([])
 
     #msg = "Getting external catalog: %s"%catalog
-    ext = get_gaia_catalog(hpx)
+    ext = get_gaia_catalog(hpx,version=version)
 
     m = match_query(cat['RA'],cat['DEC'],ext['RA'],ext['DEC'])
 
@@ -156,8 +189,10 @@ def gaia_photometry(catfile,nside=64,band=None,plot=False):
     cat_match = cat[m[0][sel]]
     ext_match = ext[m[1][sel]]
 
-    cat_G = gaia_transform(cat_match[mag_g],cat_match[mag_r],cat_match[mag_i],cat_match[mag_z])
-    # Need to put Gaia on AB system
+    cat_G = gaia_transform(cat_match[mag_g],cat_match[mag_r],cat_match[mag_i],cat_match[mag_z],
+                           version=version)
+
+    # Need to put Gaia flux onto the AB system
     ext_G = -2.5 * np.log10(ext_match['PHOT_G_MEAN_FLUX']) + 25.7934
     diff  = cat_G - ext_G
 
@@ -267,7 +302,8 @@ if __name__ == "__main__":
 
     if opts.type == 'gaia':
         func = gaia_photometry
-        outbase += '_gaia'
+        kwargs['version'] = 'edr3'
+        outbase += '_gaia_%(version)s'%kwargs
     elif opts.type == 'rms':
         func = rms_photometry
         outbase += '_rms'

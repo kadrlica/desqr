@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+"""Constants used elsewhere in the code..."""
+
 from collections import OrderedDict as odict
 
 ZEROSTR = '1%05d%08d'
@@ -8,7 +10,8 @@ BANDS = ['g','r','i','z','Y']
 MINBANDS = 2
 COLORS = odict([('g','green'),('r','red'),('i','gold'),('z','purple'),('Y','gray')])
 BADMAG = 99.
-# Matches (illadvised?) choice by DESDM 
+BADVAL = -1
+# Matches (ill-advised?) choice by DESDM 
 # BADMAGERR = 1. 
 BADZP = 0b10
 OBJECT_ID = 'QUICK_OBJECT_ID'

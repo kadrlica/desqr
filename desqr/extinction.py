@@ -21,8 +21,9 @@ import healpy as hp
 # These are some packages that are hanging around
 import ugali.utils.healpix as healpix
 from ugali.utils.projector import cel2gal
-import utils
 from ugali.utils.logger import logger
+
+import utils
 
 
 BANDS = ['g','r','i','z','Y','y']
@@ -84,6 +85,9 @@ DR1 = odict([
         ('Y',1.048),
         ('y',1.048),
         ])
+# DES DR2 is the same as DES DR1
+# https://arxiv.org/abs/2101.05765
+DR2 = DR1
 
 # From Table 6 in Schlafly 2011 with Rv = 3.1
 # http://iopscience.iop.org/article/10.1088/0004-637X/737/2/103/pdf
@@ -134,6 +138,7 @@ def writefile(filename,data,force=False):
         msg = "Unrecognized file extension: %s"%ext
         raise Exception(msg)
 
+@utils.ignore_warning(UserWarning)
 def ebv(ra,dec,ebvmap=None):
     ra = np.atleast_1d(ra)
     dec = np.atleast_1d(dec)
@@ -149,11 +154,11 @@ def ebv(ra,dec,ebvmap=None):
         filename = tempfile.NamedTemporaryFile().name
         cmd = "wget %s -O %s"%(url,filename)
         subprocess.call(cmd,shell=True)
-        ebvmap = healpy.read_map(filename)
+        ebvmap = healpy.read_map(filename,verbose=False)
         os.remove(filename)
-    elif isinstance(ebvmap,basestring):
+    elif utils.isstring(ebvmap):
         logger.info("Loading %s..."%ebvmap)
-        ebvmap = healpy.read_map(ebvmap)
+        ebvmap = healpy.read_map(ebvmap,verbose=False)
     else:
         msg = "Unrecognized ebv: %s"%ebvmap
         raise Exception(msg)
@@ -163,18 +168,27 @@ def ebv(ra,dec,ebvmap=None):
     ebv = healpix.get_interp_val(ebvmap,glon,glat)
     return ebv
 
-def extinction(ebv,band):
+def extinction(ebv,band,coeff=None):
     """
     Calculate the extinction from the E(B-V) value and the band.
-    
-    ebv  : The dust value
+
+    Parameters
+    -----------
+    ebv  : The dust value E(B-V)
     band : The DES band (string or array)
+    coeff: the reddening coefficients (R_b)
+
+    Returns
+    -------
+    extinction : The A_b values [A_b = R_b * E(B-V)]
     """
-    if isinstance(band,basestring):
+    if utils.isstring(band):
         band = np.repeat(band,len(ebv))
+
+    if coeff is None: coeff = DR1
         
     bands,inv = np.unique(band,return_inverse=True)
-    values = np.array([COEFF[b] for b in bands])
+    values = np.array([coeff[b] for b in bands])
     return values[inv] * ebv
 
 if __name__ == "__main__":
@@ -245,7 +259,7 @@ if __name__ == "__main__":
             band = data[b]
             extname = args.ext
 
-        extval = extinction(ebvval,band)
+        extval = extinction(ebvval,band,coeff=COEFF)
         values.append(extval)
         dtypes.append((extname,'f4'))
 

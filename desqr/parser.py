@@ -18,18 +18,35 @@ class Parser(argparse.ArgumentParser):
                           help='force overwrite')
         self.add_argument('-n','--njobs',default=30,type=int,
                           help='number of jobs to submit')
+        self.add_argument('-p','--pix',action='append',type=str,
+                          help='pixel or pixel list to run')
         self.add_argument('-q','--queue',default='vanilla',
                           help='queue to submit')
         self.add_argument('--sleep',default=0,type=float,
                           help='sleep between jobs')
         self.add_argument('-v','--verbose',action='store_true',
-                           help='output verbosity')
+                          help='output verbosity')
 
     def _parse_verbose(self,opts):
         """Set logging level based on verbosity"""
         level = logging.DEBUG if vars(opts).get('verbose') else logging.INFO
         logging.getLogger().setLevel(level)
 
+    def _parse_pixels(self,opts):
+        if not opts.pix: return
+
+        pixels = []
+        for pix in opts.pix:
+            try:
+                pixlist = np.genfromtxt(pix).to_list()
+            except TypeError: 
+                pixlist = [int(pix)]
+                
+            pixels += pixlist
+                
+        opts.pix = pixels
+            
+        
     def parse_args(self,*args,**kwargs):
         opts = super(Parser,self).parse_args(*args,**kwargs)
         self._parse_verbose(opts)

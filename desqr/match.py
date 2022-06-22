@@ -24,9 +24,9 @@ from ugali.utils.projector import angsep
 
 
 try:
-    from utils import set_memory_limit, insert_columns
-    from const import ZEROSTR,OBJECT_ID
-    from split import split_qcat
+    from desqr.utils import set_memory_limit, insert_columns
+    from desqr.const import ZEROSTR,OBJECT_ID
+    from desqr.split import split_qcat
 except ModuleNotFoundError:
     from .utils import set_memory_limit, insert_columns
     from .const import ZEROSTR,OBJECT_ID
@@ -48,8 +48,30 @@ MATCHCOLS = ['RA','DEC','EXPNUM']
 ###     coords[:, 2] = z
 ###     return coords
 
-def projector(lon,lat):
-    return hp.rotator.dir2vec(lon,lat,lonlat=True).T
+
+def ang2vec(lon, lat):
+    """Convert longitude and latitude into array of unit vectors.
+
+    Parameters
+    ----------
+    lon : longitude (deg)
+    lat : latitude (deg)
+
+    Returns
+    -------
+    vec : 2D array of vectors
+    """
+    lonr = np.deg2rad(lon)
+    latr = np.deg2rad(lat)
+    coslat = np.cos(latr)
+    return np.stack([
+        np.atleast_1d(np.cos(lonr) * coslat),
+        np.atleast_1d(np.sin(lonr) * coslat),
+        np.atleast_1d(np.sin(latr)),
+    ], axis=-1)
+
+def projector(lon, lat):
+    return ang2vec(lon,lat)
 
 def centroid(lon,lat,stat='median',labels=None,index=None):
     if labels is None: 
@@ -75,6 +97,74 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
 
     return lon_out % 360.,lat_out
 
+
+def match_to_self(lon, lat, radius, min_match=1, min_obs=1):
+    """Match a list of lon/lat positions to itself.
+
+    Parameters
+    ----------
+    lon : `np.ndarray`
+        Array of longitude positions (degrees)
+    lat : `np.ndarray`
+        Array of latitude positions (degrees)
+    radius : `float`
+        Radius to match (degrees)
+    min_obs : `int`, optional
+        Minimum number of matches to count.
+
+    Returns
+    -------
+    idx : `list` [`list` [`int`]]
+        List of match indices for each object.
+        Sorted from most matches to fewest, duplicates removed.
+    """
+    coords = ang2vec(lon, lat)
+    tree = cKDTree(coords)
+    angle = 2.0*np.sin(np.deg2rad(radius)/2.0)
+    idx = tree.query_ball_tree(tree, angle, eps=0.0)
+    # We start with the most matches, so we need this sorted
+    len_arr = np.array([len(j) for j in idx])
+    st = np.argsort(len_arr)[:: -1]
+    match_id = np.full(len(idx), -1, dtype=np.int32)
+    idx2 = []
+    for j in st:
+        if match_id[j] < 0 and len_arr[j] >= min_obs:
+            match_id[idx[j]] = j
+            idx2.append(idx[j])
+    return idx2
+
+def match_to_other(lon1, lat1, radius, lon2, lat2):
+    """Match one list of lon/lat positions to another list of lon/lat positions.
+
+    Parameters
+    ----------
+    lon1 : `np.ndarray`
+        Array of longitude positions for list 1 (degrees)
+    lat1 : `np.ndarray`
+        Array of latitude positions for list 1 (degrees)
+    radius : `float`
+        Radius of matches (degrees)
+    lon2 : `np.ndarray`
+        Array of longitude positions for list 2 (degrees)
+    lat2 : `np.ndarray`
+        Array of latitude positions for list 2 (degrees)
+
+    Returns
+    -------
+    idx : `list` [`list` [`int`]]
+        Each row in idx corresponds to each position in lon1/lat1.
+        The indices in the row correspond to the indices in lon2/lat2.
+    """
+    coords1 = ang2vec(lon1, lat1)
+    coords2 = ang2vec(lon2, lat2)
+    tree1 = cKDTree(coords1)
+    # The second tree in the match does not need to be balanced, and
+    # turning this off yields significantly faster runtime.
+    tree2 = cKDTree(coords2, balanced_tree=False)
+    angle = 2.0*np.sin(np.deg2rad(radius)/2.0)
+    idx = tree1.query_ball_tree(tree2, angle, eps=0.0)
+    return idx
+
 def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
     """
     Perform a KDTree match after transforming to Cartesian coordinates.
@@ -94,8 +184,8 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
     idx2 : index into the second array
     ds   : angular seperation (deg)
     """
-    coords1 = projector(lon1,lat1)
-    coords2 = projector(lon2,lat2)
+    coords1 = ang2vec(lon1, lat1)
+    coords2 = ang2vec(lon2, lat2)
  
     tree = cKDTree(coords2)
     idx1 = np.arange(lon1.size) 
@@ -130,11 +220,13 @@ def match_ball_tree(lon,lat,radius=1.0):
     logger.info("Matching %i objects."%nobjs)
      
     # First iteration...
-    coords = projector(lon,lat)
-    dist = (radius/3600.)*(np.pi/180.)
+    coords = ang2vec(lon, lat)
+    #dist = (radius/3600.)*(np.pi/180.)
+    dist = 2.0*np.sin(np.deg2rad(radius/3600.)/2.0)
     tree = cKDTree(coords)
     logger.info("Querying ball tree with radius %s arcsec..."%radius)
     idx = tree.query_ball_tree(tree,dist,eps=0.01)
+    # Because memory...
     del tree, coords
     gc.collect()
 

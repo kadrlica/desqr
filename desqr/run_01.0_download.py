@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()
 
-    config = yaml.load(open(args.config))
+    config = yaml.safe_load(open(args.config))
     rawdir = config['rawdir']
     explist = config['explist']
     tags = config.get('tags')

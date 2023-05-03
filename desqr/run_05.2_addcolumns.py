@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Add dereddened columns
+Add de-reddened columns
 """
 import os
 from os.path import basename

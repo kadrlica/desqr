@@ -1,41 +1,42 @@
 #!/usr/bin/env python
+"""
+Characterize photometric depth.
+"""
 import glob
 import os,sys
 import time
 from os.path import join
 import subprocess
+
 import matplotlib
 try:             os.environ['DISPLAY']
 except KeyError: matplotlib.use('Agg')
 matplotlib.use('Agg')
-from multiprocessing import Pool
+import pylab as plt
 
-import fitsio
 import numpy as np
 import scipy.ndimage as nd
 import scipy.stats
-import pylab as plt
-import matplotlib.colors as colors
-import healpy
 import yaml
+import fitsio
+import healpy as hp
 
-from ugali.utils.healpix import ang2pix,pix2ang
-from ugali.utils.projector import angsep
-from ugali.utils.shell import mkdir
 import ugali.utils.projector
+from ugali.utils.projector import angsep
 
 from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
-from utils import bfields, load_infiles
-from footprint import blank,unseen
-import footprint
+from footprint import blank, empty
 import plotting
 from plotting import draw_footprint, draw_peak
-from utils import logger
+import utils
+from utils import mkdir, logger
+from utils import bfields, load_infiles
 
 NSIDE = 1024
 
-def draw_maglim_hist(skymap,**kwargs):
-    maglims = skymap[skymap > 0]
+def draw_maglim_hist(hpxmap,**kwargs):
+    DeprecationWarning()
+    maglims = hpxmap[hpxmap > 0]
     kwargs.setdefault('bins',np.linspace(maglims.min(),maglims.max(),100))
     kwargs.setdefault('histtype','step')
     kwargs.setdefault('normed',True)
@@ -60,31 +61,34 @@ def draw_maglim_hist(skymap,**kwargs):
     ax2.set_ylim(0,1)
     return quantiles,percentiles
 
-def maglim_range(skymap):
-    pix = np.where(skymap > 0)
-    sort = np.sort(skymap[pix])
+def maglim_range(hpxmap):
+    DeprecationWarning()
+    pix = np.where(hpxmap > 0)
+    sort = np.sort(hpxmap[pix])
     vmin = sort[int(len(sort) * 0.005)]
     vmax = sort[int(len(sort) * 0.995)]
     return vmin, vmax
 
-def draw_maglim_pixel(skymap,**kwargs):
-    nside = healpy.npix2nside(len(skymap))
-    pix = np.where(skymap > 0)
+def draw_maglim_pixel(hpxmap,**kwargs):
+    DeprecationWarning()
+    nside = hp.npix2nside(len(hpxmap))
+    pix = np.where(hpxmap > 0)
     if len(pix[0]) == 0:
         logger.warn("No maglims found")
         return
 
-    ra,dec = pix2ang(nside,pix)
+    ra,dec = hp.pix2ang(nside,pix,lonlat=True)
     ra_center,dec_center = np.median(ra),np.median(dec)
 
-    vmin,vmax = maglim_range(skymap)
+    vmin,vmax = maglim_range(hpxmap)
 
     kwargs.setdefault('rot',(ra_center, dec_center, 0.))
     kwargs.setdefault('min',vmin)
     kwargs.setdefault('max',vmax)
-    healpy.gnomview(skymap,**kwargs)
+    hp.gnomview(hpxmap,**kwargs)
 
 def draw_magerr(mag,magerr,**kwargs):
+    DeprecationWarning()
     kwargs.setdefault('fmt','o')
     bins = kwargs.pop('bins',np.linspace(16,25,100))
                       
@@ -99,8 +103,25 @@ def draw_magerr(mag,magerr,**kwargs):
     ax.errorbar(centers,mean,yerr=std,**kwargs)
     return median,mean,std
 
+def plot_depth(filename,outfile=None,survey='delve'):
+    logger.info("Reading %s..."%filename)
+    hpxmap = hp.read_map(filename,verbose=False)
 
-def depth(infile,nside=NSIDE,signal_to_noise=10.):
+    label = r'Magnitude Limit (mag)'
+    cbar_kwargs = dict(label=label)
+    hpxmap_kwargs = dict(xsize=2000)
+    fig,axes,smap = plotting.plot_hpxmap_hist(hpxmap,survey,cbar_kwargs,hpxmap_kwargs)
+    #axes[0].annotate('%s band'%band, (0.05,0.93), xycoords='axes fraction')
+    axes[1].set_xlabel(label)
+
+    if outfile is None: 
+        outfile=os.path.basename(filename).split('.')[0]+'.png'
+    logger.info("Writing %s..."%outfile)
+    plt.savefig(outfile,bbox_inches='tight')
+
+
+def depth_psf(infile,nside=NSIDE,snr=10.):
+    """ MAG_PSF depth with star/galaxy selection """
     MAGS = bfields('MAG_PSF',BANDS)
     MAGERRS = bfields('MAGERR_PSF',BANDS)
     SPREADS = bfields('WAVG_SPREAD_MODEL',BANDS)
@@ -108,7 +129,7 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
     # From propagation of errors:
     # mag = -2.5 * log10(flux)
     # magerr = -2.5/ln(10) * fluxerr/flux
-    mag_snr = (2.5/np.log(10)) / (signal_to_noise)
+    mag_snr = (2.5/np.log(10)) / (snr)
 
     logger.info(infile)
     ret = dict()
@@ -126,7 +147,64 @@ def depth(infile,nside=NSIDE,signal_to_noise=10.):
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
-        pix = ang2pix(nside,d['RA'],d['DEC'])
+        pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
+
+        match = ugali.utils.projector.match(d['RA'],d['DEC'],d['RA'],d['DEC'],nnearest=2)
+
+        delta_mag = d[mag][match[1]] - d[mag][match[0]]
+        delta_log_magerr = np.log10(d[magerr][match[1]]) - np.log10(d[magerr][match[0]])
+
+        old = np.seterr(divide='ignore',invalid='ignore')
+        ratio = delta_log_magerr / delta_mag
+        cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
+        np.seterr(**old)
+
+        if cut_nan_inf.sum() < 2:
+            logger.warn("Insufficent objects in %s-band"%band)
+            ret[band] = [np.array([],dtype=int),np.array([])]            
+            continue
+
+        kde = scipy.stats.gaussian_kde(ratio[cut_nan_inf])
+
+        values = np.linspace(0., 1., 1000)
+        kde_values = kde.evaluate(values)
+        slope = values[np.argmax(kde_values)]
+        
+        maglims = d[mag] - ((np.log10(d[magerr]) - np.log10(mag_snr)) / slope)
+
+        hpx = np.unique(pix)
+        maglim = nd.median(maglims,labels=pix,index=hpx)
+        ret[band] = [hpx,maglim]
+    return ret
+
+def depth_auto(infile,nside=NSIDE,snr=10.):
+    """ MAG_AUTO depth without star/galaxy selection """
+
+    MAGS = bfields('MAG_AUTO',BANDS)
+    MAGERRS = bfields('MAGERR_AUTO',BANDS)
+
+    # From propagation of errors:
+    # mag = -2.5 * log10(flux)
+    # magerr = -2.5/ln(10) * fluxerr/flux
+    mag_snr = (2.5/np.log(10)) / (snr)
+
+    logger.info(infile)
+    ret = dict()
+    for band,mag,magerr in zip(BANDS,MAGS,MAGERRS):
+        data = fitsio.read(infile,columns=['RA','DEC',mag,magerr])
+
+        h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
+        mag_bright_end = edges[np.argmax(h)] - 3.
+
+        cut = (data[mag] > mag_bright_end) & (data[mag] < 30.)
+
+        d = data[cut]
+        if len(d) < 2:
+            logger.warn("Insufficent objects in %s-band"%band)
+            ret[band] = [np.array([],dtype=int),np.array([])]            
+            continue
+
+        pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
 
         match = ugali.utils.projector.match(d['RA'],d['DEC'],d['RA'],d['DEC'],nnearest=2)
 
@@ -164,7 +242,7 @@ def teff(infile,nside=NSIDE,mode='median'):
     ret = dict()
     for band,teff in zip(BANDS,TEFFS):
         data = fitsio.read(infile,columns=['RA','DEC',teff])
-        pix = ang2pix(nside,data['RA'],data['DEC'])
+        pix = hp.ang2pix(nside,data['RA'],data['DEC'],lonlat=True)
         hpx = np.unique(pix)        
 
         if mode.lower() is 'median':
@@ -183,71 +261,49 @@ if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',nargs='?')
+    parser.add_argument('config',help='configuration file')
     parser.add_argument('-n','--nside',default=NSIDE,type=int)
     parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('-s','--survey',default='des')
+    parser.add_argument('--type',default='psf',choices=['psf','auto'])
+    parser.add_argument('--snr',default=10,type=float)
     args = parser.parse_args()
 
-    if args.verbose:
-        logger.setLevel(logger.INFO)
+    if args.verbose: logger.setLevel(logger.INFO)
     
-    if args.config:
-        config = yaml.load(open(args.config))
-        BANDS = config['bands']
-
+    config = yaml.load(open(args.config))
+    BANDS = config['bands']
     NSIDE = args.nside
-
+    survey = config.get('survey')
     outdir = mkdir('release/depth')
 
-    infiles = sorted(glob.glob('cat/cat_hpx_*.fits'))
-    
-    p = Pool(maxtasksperchild=1,processes=20)
-    out = p.map(depth,infiles)
+    filenames = sorted(glob.glob('cat/cat_hpx_*.fits'))
+    arglist = list(zip(filenames,))
+    kwargs = dict(nside=args.nside,snr=args.snr)
 
-    skymaps = dict()
+    if args.type == 'psf': 
+        func = depth_psf
+    elif args.type == 'auto': 
+        func = depth_auto
+    else: raise Exception('Unrecognized magnitude: %s'%args.type)
+
+    out = utils.multiproc(func,arglist,kwargs)
+
+    basename = 'maglim_%s_%isig'%(args.type,args.snr)
+    hpxmaps = dict()
     for b in BANDS:
         logger.info("Filling %s-band..."%b)
-        skymap = blank(NSIDE)
+        hpxmaps[b] = hpxmap = blank(NSIDE)
         for i,maglims in enumerate(out):
-            logger.info(str(i))
-            skymap[maglims[b][0]] = maglims[b][1]
-        skymaps[b] = np.ma.MaskedArray(skymap,np.isnan(skymap),fill_value=np.nan)
-        outfile = join(outdir,'y2q1_maglim_%s_n%i_ring.fits'%(b,NSIDE))
+            logger.info(str(filenames[i]))
+            hpxmap[maglims[b][0]] = maglims[b][1]
+
+        outfile = join(outdir,basename+'_%s_n%i.fits.gz'%(b,NSIDE))
         logger.info("Writing %s..."%outfile)
-        healpy.write_map(outfile,skymaps[b].data)
-        logger.info("Gzipping %s..."%outfile)
-        subprocess.call('gzip -f %s'%outfile,shell=True)
-        
-    out = dict()
-    outstr = '|_. Band |_. Footprint |_. Distribution |_. Magnitude Limit |\n'
-    template = '|_. %(band)s |{{thumbnail(%(map)s, size=300)}}|{{thumbnail(%(hist)s, size=300)}}|_. %(maglim)s |\n'
-     
+        hp.write_map(outfile,hpxmap)
+
     for b in BANDS:
-        skymap = skymaps[b]
-        out['band'] = b
+        outfile = join(outdir,basename+'_%s_n%i.fits.gz'%(b,NSIDE))
+        logger.info("Plotting %s..."%outfile)
+        pngfile = outfile.replace('.fits.gz','.png')
+        plot_depth(outfile,pngfile,survey=survey)
 
-        plt.figure()
-        vmin,vmax = maglim_range(skymap)
-        if args.survey == 'des':
-            im = plotting.draw_des(skymap,vmin=vmin,vmax=vmax)
-        elif args.survey == 'maglites':
-            im = plotting.draw_maglites(skymap,vmin=vmin,vmax=vmax)
-        else:
-            im = plotting.draw_footprint(skymap,vmin=vmin,vmax=vmax)
-        plt.colorbar(im,label=r'Magnitude Limit (mag)')
-        plt.title(r'10$\sigma$ Limiting Magnigude (%s-band)'%b)
-        outfile = join(outdir,'y2q1_maglim_%s_n%i_car.png'%(b,NSIDE))
-        plt.savefig(outfile,bbox_inches='tight')
-        out['map'] = os.path.basename(outfile)
-
-        plt.figure()
-        q,p = draw_maglim_hist(skymap)
-        plt.title('Magnitude Limits (%s-band)'%b)
-        plt.legend(loc='upper left')
-        outfile = join(outdir,'y2q1_maglim_%s_hist.png'%b)
-        plt.savefig(outfile,bbox_inches='tight')
-        out['hist'] = os.path.basename(outfile)
-        out['maglim'] = '/'.join(['%.2f'%_p for _p in p])
-        outstr += template%out
-    print outstr

@@ -1,31 +1,30 @@
 #!/usr/bin/env python
 """
-Match catalog objects within and across input files.
+Match catalog objects within healpix.
 """
 import os
 import time
-import yaml
 import subprocess
-import time
 import glob
+import yaml
 
 import fitsio
 import numpy as np
 import healpy as hp
 
-from ugali.utils.shell import mkdir
+from utils import mkdir
 from const import OBJECT_ID
 
 if __name__ == "__main__":
     from parser import Parser
     parser = Parser(description=__doc__)
-    parser.set_defaults(njobs=10)
+    parser.set_defaults(njobs=12) 
     parser.add_argument('-m','--mlimit',default=40,type=float,
                         help='memory limit (GB)')
     parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
-    config = yaml.load(open(args.config))
+    config = yaml.safe_load(open(args.config))
     hpxdir = config['hpxdir']
     logdir = mkdir(os.path.join(hpxdir,'log'))
     radius = config['radius']
@@ -36,7 +35,7 @@ if __name__ == "__main__":
     else: pixels = np.arange(hp.nside2npix(config['nside']))
         
     for pix in pixels:
-        infiles = glob.glob(hpxdir+'/*/*%05d*.fits'%pix)
+        infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         if len(infiles) == 0: continue
 
         done = (not args.force)

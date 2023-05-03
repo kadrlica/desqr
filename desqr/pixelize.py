@@ -1,15 +1,14 @@
 #!/usr/bin/env python
 import os,shutil
 import glob
+
 import numpy as np
-import fitsio
-import pandas as pd
 import numpy.lib.recfunctions as recfuncs
-import healpy
+import pandas as pd
+import fitsio
+import healpy as hp
 
 from ugali.utils.logger import logger
-from ugali.utils.projector import cel2gal
-#from ugali.utils.healpix import ang2pix
 from ugali.utils.shell import mkdir
 
 HPXBASE = 'hpx_%05d.fits'
@@ -24,14 +23,6 @@ ALT_RADEC_COLUMNS = [
 # Object to string conversion
 OBJ = '|O'
 STR = '|S30'
-
-def ang2pix(nside, lon, lat, nest=False):
-    """
-    Input (lon, lat) in degrees instead of (theta, phi) in radians
-    """
-    theta = np.radians(90. - lat)
-    phi = np.radians(lon)
-    return healpy.ang2pix(nside, theta, phi, nest)
 
 def read_csv_float32(filename):
     """
@@ -93,7 +84,7 @@ def readfile(filename,float32=False):
     return data
 
 def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=False,
-             float32=False):
+             float32=False,nest=False):
     """
     Break catalog up into a set of healpix files.
     """
@@ -113,7 +104,7 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
         data = readfile(infile,float32)
         if data is None: continue
 
-        catalog_pix = ang2pix(nside,data['RA'],data['DEC'])
+        catalog_pix = hp.ang2pix(nside,data['RA'],data['DEC'],nest=nest,lonlat=True)
         #### Add object pixel (hack to get correct byte order)
         #object_pix = ang2pix(NSIDE_OBJ,data['RA'],data['DEC'],nest=True)
         #name = 'HPX%i'%NSIDE_OBJ; dtype = '>i4'
@@ -122,7 +113,8 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
         for pix in np.unique(catalog_pix):
             logger.debug("Processing pixel %s"%pix)
 
-            if 'BAND' in data.dtype.names:
+            force_band = True
+            if ('BAND' in data.dtype.names) and (not force_band):
                 band = np.unique(data['BAND'])
                 if len(band) != 1 and not force:
                     msg = "Found bands: %s"%band
@@ -154,7 +146,7 @@ if __name__ == "__main__":
     import argparse
     description = "python script"
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('indir',help='input directory')
+    parser.add_argument('input',help='input directory or file')
     parser.add_argument('outdir',help='output directory')
     parser.add_argument('--ra-dec',nargs=2,
                         help='names of input RA,DEC columns (case insensitive)')
@@ -162,6 +154,8 @@ if __name__ == "__main__":
                         help='output file basename')
     parser.add_argument('-n','--nside',default=16,type=int,
                         help='output nside')
+    parser.add_argument('--nest',action='store_true',
+                        help='nested ordering')
     parser.add_argument('--float32',action='store_true',
                         help='convert columns to float32 (excludes RA,DEC)')
     parser.add_argument('-f','--force',action='store_true',
@@ -174,10 +168,20 @@ if __name__ == "__main__":
     if args.ra_dec:
         ALT_RADEC_COLUMNS = [args.ra_dec] + ALT_RADEC_COLUMNS
 
-    # Grab fits or csv files
-    for ext in ['.fits','.fits.gz','.csv','.csv.gz']:
-        infiles = sorted(glob.glob(args.indir+'/*'+ext))
-        if infiles: break
+    if os.path.isfile(args.input): 
+        if args.input.endswith(('.txt','.dat')):
+            infiles = np.loadtxt(args.input,dtype=str)
+        else: 
+            msg = "Unrecognized input: %s"%args.input
+            raise IOError(msg)
+    elif os.path.isdir(args.input):
+        # Grab fits or csv files
+        for ext in ['.fits','.fits.gz','.csv','.csv.gz']:
+            infiles = sorted(glob.glob(args.input+'/*'+ext))
+            if infiles: break
+    else:
+        msg = "Unrecognized input: %s"%args.input
+        raise IOError(msg)
 
     pixelize(infiles,args.outdir,args.outbase,nside=args.nside,
-             force=args.force,float32=args.float32)
+             force=args.force,float32=args.float32,nest=args.nest)

@@ -80,6 +80,7 @@ def run_pool(func, args, **kwargs):
     return pool.map(func,args)
 
 def check_files(explist,files):
+    """ Check that file exist """
     exp = explist
     nfiles = len(files)
     unit = np.array([basename(f).split('_')[0] for f in files])
@@ -258,6 +259,8 @@ if __name__ == "__main__":
     BANDS  = bands
     rawdir = config['rawdir']
     hpxdir = config['hpxdir']
+    keydir = config['keydir']
+    catdir = config['catdir']
 
     # First, check the download
 
@@ -275,12 +278,16 @@ if __name__ == "__main__":
 
             ##############################
             if section == 'download':
-                dirname = join(config['rawdir'],band)
+                dirname = join(rawdir,band)
                 if not dir_exists(dirname): continue
 
                 RAWCOUNT = 0
 
-                files = sorted(glob.glob(dirname+'/*.fits'))
+                pathfile = os.path.join(hpxdir,'filepaths_%s.txt'%band)
+                if os.path.exists(pathfile):
+                    files = np.loadtxt(pathfile,dtype=str)
+                else:
+                    files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
                 args = [(f,nfiles,band) for f in files]
 
@@ -311,7 +318,7 @@ if __name__ == "__main__":
 
             ##############################
             if section == 'pixelize':
-                dirname = join(config['hpxdir'],band)
+                dirname = join(hpxdir,band)
                 if not dir_exists(dirname): continue
 
                 HPXCOUNT = 0
@@ -335,7 +342,7 @@ if __name__ == "__main__":
 
             ##############################
             if section == 'match':
-                dirname = join(config['hpxdir'],band)
+                dirname = join(hpxdir,band)
                 if not dir_exists(dirname): continue
                 
                 files = sorted(glob.glob(dirname+'/*.fits'))
@@ -348,7 +355,7 @@ if __name__ == "__main__":
                     
             ##############################
             if section == 'zeropoint':
-                dirname = join(config['hpxdir'],band)
+                dirname = join(hpxdir,band)
                 if not dir_exists(dirname): continue
 
                 files = sorted(glob.glob(dirname+'/*.fits'))
@@ -365,9 +372,7 @@ if __name__ == "__main__":
             
             ##############################
             if section == 'catalog':
-                catdir = config['catdir']
                 if not dir_exists(catdir): continue
-                keydir = config['keydir']
                 if not dir_exists(keydir): continue
                 
                 files = sorted(glob.glob(catdir+'/*.fits'))
@@ -390,9 +395,7 @@ if __name__ == "__main__":
                 print FAIL if np.any(out) else OK
 
     if 'nan' in sections:
-        catdir = config['catdir']
         if not dir_exists(catdir): pass
-        keydir = config['keydir']
         if not dir_exists(keydir): pass
         
         files = sorted(glob.glob(catdir+'/*.fits'))

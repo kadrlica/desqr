@@ -22,18 +22,23 @@ except ModuleNotFoundError:
     from .const import BANDS, TAGS
 
 
+# Order defined below
+des70 = '/data/des70.c/data/BLISS/{dirname}/{expnum}'
 des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}'
 des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}'
 des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}'
-des70 = '/data/des70.c/data/BLISS/{dirname}/{expnum}'
-filebase = 'D00{expnum}_*_fullcat.fits'
+filebase = 'D{expnum:08d}_*_fullcat.fits'
 
 PATHS = [os.path.join(dirname,filebase) for dirname in [des70,des50,des60,des61]]
 
 #print("WARNING: NGC55 hack")
 #PATHS = ['/home/s1/kadrlica/projects/delve/deep/v1/data/{dirname}/{expnum}/D00{expnum}_*-fullcat.fits']
 
+# Old skim column names
 DTYPES = [('FILENAME', 'S48'), ('PFW_ATTEMPT_ID', '>i8'), ('TAG', 'S13'), ('UNITNAME', 'S9'), ('REQNUM', '>i4'), ('ATTNUM', '>i2'), ('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('FLAGS', '>i2'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'),('IMAFLAGS_ISO','>i2'),('MJD_OBS','>f8'),('EXPTIME','>f4')]
+# New reduced column set...
+#DTYPES = [('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('TAG', 'S13'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('MJD_OBS','>f8'), ('EXPTIME','>f4'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('KRON_RADIUS', '>f4'), ('FLUX_RADIUS', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'), ('FLAGS', '>i2'), ('IMAFLAGS_ISO','>i2')]
+
 TAG = ''
 
 def get_dirname(expnum):
@@ -69,6 +74,7 @@ def bliss_select(data):
     # Not saturated, but blends and neighbors ok
     sel &= data['FLAGS'] < 4
     # No "bad" imaflags_iso
+    # http://des-docdb.fnal.gov:8080/cgi-bin/ShowDocument?docid=8814
     sel &= (data['IMAFLAGS_ISO'] & 2047) == 0 
     # MAGERR_PSF < 0.5 (PSF S/N > 2.17)
     olderr = np.seterr(invalid='ignore',divide='ignore')
@@ -84,6 +90,9 @@ def fgcm_select(data):
     sel = data['FLUX_PSF'] > 0
     sel &= data['FLAGS'] < 4
     sel &= (data['IMAFLAGS_ISO'] & 2047) == 0 
+
+    ### ADW: We should have been selecting only stars
+    #sel &= np.abs(data['SPREAD_MODEL']) < 0.01    
 
     olderr = np.seterr(invalid='ignore',divide='ignore')
     sel &= data['FLUX_PSF']/data['FLUXERR_PSF'] > 5
@@ -200,8 +209,13 @@ def downskim(outfile,select,exp,force):
     filenames = get_filenames(expnum,path)
     output = create_downskim(filenames,select,exp,DTYPES,TAG)
 
+    outdir = os.path.dirname(outfile)
+    mkdir(outdir)
+
     logging.info("Writing %s..."%outfile)
-    fitsio.write(outfile,output)
+    dirname = os.path.dirname(filenames[0])
+    header = [dict(name='PATH',value=dirname,comment='original path')]
+    fitsio.write(outfile,output,header=header,clobber=True)
 
 if __name__ == "__main__":
     import argparse
@@ -217,7 +231,7 @@ if __name__ == "__main__":
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.getLogger().setLevel(level)
 
-    explist = pd.read_csv(args.explist).to_records(index=False)
+    explist = pd.read_csv(args.explist,comment='#').to_records(index=False)
     explist.dtype.names = [str(n).upper() for n in explist.dtype.names]
     exp = explist[explist['EXPNUM'] == args.expnum]
 

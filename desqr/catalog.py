@@ -5,27 +5,31 @@ Create the catalog-level coadd.
 import os, sys
 import time
 from collections import OrderedDict as odict
-from functools import wraps
 import copy
+import warnings
+
 import fitsio
 import numpy as np
 import numpy.lib.recfunctions as recfuncs
-import healpy
-
-from const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
-from const import BADMAG
-import utils
-from utils import bfields, load_infiles
-from pixelize import ang2pix
-
+import healpy as hp
 import scipy.ndimage as nd
-from ugali.utils.logger import logger
-import ugali.utils.projector
 
-# Columns that are loaded into memory
+import const
+from const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
+from const import BADMAG, BADVAL
+import utils
+from utils import bfield, bfields, load_infiles, verbose
+
+from ugali.utils.logger import logger
+
+##################################################
+################# Input columns #################$
+##################################################
+
 BAND = 'BAND'
 #IDX = [OBJECT_ID,BAND] + ['FILENAME','REQNUM','ATTNUM','OBJECT_NUMBER','TAG']
-IDX = [OBJECT_ID,BAND] + ['FILENAME','PFW_ATTEMPT_ID','OBJECT_NUMBER','TAG']
+#IDX = [OBJECT_ID,BAND] + ['FILENAME','PFW_ATTEMPT_ID','OBJECT_NUMBER','TAG']
+IDX = [OBJECT_ID,BAND] + ['FILENAME','OBJECT_NUMBER']
 COORDS = ['RA','DEC']
 HEALPIX = ['HPX%d'%nside for nside in NSIDES]
 MAGPSF = ['MAG_PSF','MAGERR_PSF']
@@ -38,54 +42,49 @@ FLAGS = ['FLAGS']
 NEPOCHS = ['NEPOCHS']
 TEFF = ['T_EFF','EXPTIME']
 EXPNUM = ['EXPNUM','CCDNUM']
-#EXTINCTION = ['EXTINCTION']
-EXTINCTION = []
 IMAGE = ['A_IMAGE','B_IMAGE','THETA_IMAGE']
+MJD = ['MJD_OBS']
 
-BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + IMAGE + EXTINCTION
-INPUT_COLS = IDX + [BAND] + COORDS + BEST
+# Composite of input columns
+BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + IMAGE 
+INPUT_COLS = IDX + [BAND] + COORDS + MJD + BEST
 
-# Output columns
+##################################################
+################# Output columns #################
+##################################################
+
 WAVGMAGPSF  = ['WAVG_'+f for f in MAGPSF + ['MAGRMS_PSF']]
 WAVGMAGAUTO = ['WAVG_'+f for f in MAGAUTO + ['MAGRMS_AUTO']]
 WAVGMAGS   = WAVGMAGPSF + WAVGMAGAUTO
 WAVGSPREAD = ['WAVG_'+f for f in SPREAD + ['SPREADRMS_MODEL']]
 #              + ['MIN_SPREAD_MODEL','MIN_SPREADERR_MODEL']
 #              + ['MAX_SPREAD_MODEL','MAX_SPREADERR_MODEL']]
-### # Y2Q1
-#WAVGCLASS =  ['WAVG_'+f for f in CLASS + ['CLASSRMS_STAR','CLASSMIN_STAR','CLASSMAX_STAR']] # Y2Q1
-# Y2Q2
+#WAVGCLASS =  ['WAVG_'+f for f in CLASS + ['CLASSRMS_STAR','CLASSMIN_STAR','CLASSMAX_STAR']]
 WAVGCLASS =  []
 WAVGFLAGS = ['WAVG_'+f for f in FLAGS] 
 
 WAVG = WAVGMAGS + WAVGSPREAD + WAVGFLAGS
 
-def verbose(func):
-    """
-    Decorator for timing functions
-    """
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        logger.debug("Running %r..."%(func.__name__))
-        t0=time.time()
-        ret = func(*args,**kwargs)
-        logger.debug('%4.2fs'%(time.time()-t0))
-        return ret
-
-    return wrapper
+# Some value-added output quantities
+EBV = ['EBV']
+EXTINCTION = ['EXTINCTION']
+EXTCLASS = ['EXTENDED_CLASS']
 
 def create_output_columns(bands):
     """ Create an ordered dictionary of output column names. """
     columns = odict(
         [(i,('i8',-1)) for i in [OBJECT_ID]]
         + [(c,('f8',np.nan)) for c in COORDS]
+        + [(m,('f8',np.nan)) for m in MJD]
         + [(i,('i8',-1)) for i in HEALPIX]
         + [(f,('i2',0)) for f in bfields(NEPOCHS,bands)]
+        # Best values
         + [(f,('f4',BADMAG)) for f in bfields(MAGS,bands)]
         + [(f,('f4',-1)) for f in bfields(SPREAD[:1],bands)]
         + [(f,('f4',1)) for f in bfields(SPREAD[1:],bands)]
         + [(f,('f4',-1)) for f in bfields(CLASS,bands)]
         + [(f,('i2',99)) for f in bfields(FLAGS,bands)]
+        # Weighted-average values
         + [(f,('f4',BADMAG)) for f in bfields(WAVGMAGS,bands)]
         + [(f,('f4',-1)) for f in bfields(WAVGSPREAD[:1],bands)]
         + [(f,('f4',1)) for f in bfields(WAVGSPREAD[1:],bands)]
@@ -94,7 +93,11 @@ def create_output_columns(bands):
         + [(f,('i4',-1)) for f in bfields(EXPNUM,bands)]
         + [(f,('f4',-1)) for f in bfields(TEFF,bands)]
         + [(f,('f4',-1)) for f in bfields(IMAGE,bands)]
+
+        # Value-added columns
+        + [(f,('f4',-1)) for f in EBV]
         + [(f,('f4',-1)) for f in bfields(EXTINCTION,bands)]
+        + [(f,('i2',-9)) for f in bfields(EXTCLASS,bands)]
         )
     return columns
 
@@ -109,11 +112,33 @@ def minimum_index(input,labels,index=None):
     return np.asarray(argmin,dtype=int).reshape(len(argmin))
 
 def wavg(values,weights,labels=None,index=None,inverse=None,counts=None):
+    """Calculated the weighted average statistics. This is based on the
+    weighed sample variance using reliability weights. More details here:
+
+    http://en.wikipedia.org/wiki/Weighted_arithmetic_mean
+    https://www.gnu.org/software/gsl/doc/html/statistics.html#weighted-samples
+
+    Parameters
+    ----------
+    values : array of the values
+    weights: array of the weights (inverse variance weights: 1/error**2)
+    labels : objecet identifer for each detection
+    index  : unique list of objects
+    inverse: indices to reconstruct the original array from the unique array
+    counts : number of measurements per object
+
+    Returns
+    -------
+    wavg     : weighted average
+    wavg_std : reliability-weighted standard deviation
+    """
     # Weighted average:
     # http://en.wikipedia.org/wiki/Weighted_arithmetic_mean
     # Using the weighted sample variance with reliability weights
     # Referenced to the GSL:
     # https://www.gnu.org/software/gsl/doc/html/statistics.html#weighted-samples
+    # DES implementation is here:
+    # https://github.com/DarkEnergySurvey/wavg
 
     if labels is None: 
         labels = np.ones(len(values),dtype=int)
@@ -121,26 +146,37 @@ def wavg(values,weights,labels=None,index=None,inverse=None,counts=None):
     if any(x is None for x in [index,inverse,counts]):
         index,inverse,counts = np.unique(labels,False,True,True)
 
+    # weights are the inverse variance (1/err**2)
     V1 = nd.sum(weights,labels=labels,index=index)
     V2 = nd.sum(weights**2,labels=labels,index=index)    
 
+    # Weighted average
     wavg = nd.sum(weights*values,labels=labels,index=index)/V1
 
-    wavg_err  = nd.maximum(np.sqrt(1/weights),labels=labels,index=index)
+    # DES calculates wavg_err as the sqrt of the sum of the squares
+    # This appears to be roughly derived from the standard error on the mean
+    #wavg_err = np.sqrt(nd.sum((1/weights),labels=labels,index=index)) / counts
 
+    # Standard error on the weighted mean (with variance weights)
+    # https://en.wikipedia.org/wiki/Weighted_arithmetic_mean#Variance_weights
+    #wavg_sewm = np.sqrt(1/nd.sum(weights),labels=labels,index=index)
+
+    # The conventional unweighted RMS is
+    #wavg_rms  = nd.std(values,labels=labels,index=index)
+
+    # Maximum error (in case of failure)
+    wavg_maxerr  = nd.maximum(np.sqrt(1/weights),labels=labels,index=index)
+
+    # Square-root of the reliability weighted sample variance
     # https://en.wikipedia.org/wiki/Weighted_arithmetic_mean#Reliability_weights
-    wavg_rms  = nd.sum(weights*(values - wavg[inverse])**2,
+    wavg_std  = nd.sum(weights*(values - wavg[inverse])**2,
                        labels=labels,index=index)
-    err = np.seterr()
-    np.seterr(all='ignore')
-    wavg_rms *= (V1/(V1**2 - V2)) 
-    wavg_rms  = np.sqrt(wavg_rms)
-    np.seterr(**err)
 
-    ## Convert NaN to BADMAG
-    #wavg_rms[np.isnan(wavg_rms)] = BADMAG
+    with np.errstate(all='ignore'):
+        wavg_std *= (V1/(V1**2 - V2)) 
+        wavg_std  = np.sqrt(wavg_std)
 
-    return wavg, np.where(counts > 1,wavg_rms,wavg_err)
+    return wavg, np.where(counts > 1, wavg_std, wavg_maxerr)
 
 
 @verbose
@@ -148,15 +184,23 @@ def coadd_coords(lon,lat,labels=None,index=None):
     """
     Calculated the median coordinates of each object.
 
+    Parameters
+    ----------
+    lon    : array of longitudes (deg)
+    lat    : array of longitudes (deg)
+    labels : object identifer for each detection
+    index  : unique list of objects
+
     Returns
-      out : Dictionary of average coordinates.
+    -------
+    lon,lat : output coordinates (deg)
     """
     if labels is None: 
         labels = np.ones(len(lon),dtype=int)
 
     if index is None: index = np.unique(labels)
 
-    x,y,z = healpy.rotator.dir2vec(lon,lat,lonlat=True)
+    x,y,z = hp.rotator.dir2vec(lon,lat,lonlat=True)
 
     # Mean coordinates
     #x_out = nd.mean(x,labels=labels,index=index)
@@ -173,15 +217,37 @@ def coadd_coords(lon,lat,labels=None,index=None):
     #y_std = nd.standard_deviation(y,labels=labels,index=index)
     #z_std = nd.standard_deviation(z,labels=labels,index=index)
     
-    lon_out, lat_out = healpy.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
+    lon_out, lat_out = hp.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
 
     # What about adding a dispersion?
 
     return lon_out % 360.,lat_out
 
 @verbose
+def coadd_mjd(mjd,labels=None,index=None):
+    """
+    Calculated the median MJD associated with coordinates of each object.
+
+    Parameters
+    ----------
+    mjd    : Modified Julian Date (days)
+    labels : object identifer for each detection
+    index  : unique list of objects
+
+    Returns
+    -------
+    mjd    : median MJD (days)
+    """
+    if labels is None: 
+        labels = np.ones(len(lon),dtype=int)
+
+    if index is None: index = np.unique(labels)
+
+    return [nd.median(mjd,labels=labels,index=index)]
+
+@verbose
 def coadd_healpix(lon,lat,nsides=NSIDES,nest=True):
-    pix = [ang2pix(nside,lon,lat,nest=nest) for nside in NSIDES]
+    pix = [hp.ang2pix(nside,lon,lat,nest=nest,lonlat=True) for nside in NSIDES]
     return pix
 
 @verbose
@@ -195,7 +261,7 @@ def coadd_mag(mag,magerr,labels,index=None,inverse=None,counts=None):
     # Magnitude errors in quadrature
     wavg_magerr = np.sqrt(nd.sum(magerr**2,labels=labels,index=index))/counts
 
-    # Bad RMS values (untested)
+    # Bad weighted variance values (untested)
     wavg_magrms[np.isnan(wavg_magrms)] = BADMAG
 
     return wavg_mag,wavg_magerr,wavg_magrms
@@ -212,7 +278,7 @@ def coadd_spread(spread,spreaderr,labels,index=None,inverse=None,counts=None):
     # Add spreaderr in quadrature
     wavg_spreaderr = np.sqrt(nd.sum(spreaderr**2,labels=labels,index=index))/counts
 
-    # Bad RMS values (untested)
+    # Bad weighted variance values (untested)
     wavg_spreadrms[np.isnan(wavg_spreadrms)] = BADMAG
 
     ret = [wavg_spread,wavg_spreaderr,wavg_spreadrms]
@@ -290,6 +356,7 @@ def coadd_objects(data,bands=BANDS):
 
     keys = copy.copy(data[IDX+EXPNUM])
     keys = recfuncs.rec_append_fields(keys,UNIQUE_ID,-np.ones(len(keys)),dtypes='>i8')
+
     # OBJECT_NUMBER has a different meaning (and type) in Y1A1 and Y2N.
     # Standardize it here (wouldn't be necessary if done on download).
     # ADW: Is this working properly?
@@ -298,6 +365,10 @@ def coadd_objects(data,bands=BANDS):
 
     x = coadd_coords(data['RA'],data['DEC'],data[OBJECT_ID],index=unique_ids)
     for i,f in enumerate(COORDS):
+        cat[f] = x[i]
+
+    x = coadd_mjd(data['MJD_OBS'],data[OBJECT_ID],index=unique_ids)
+    for i,f in enumerate(MJD):
         cat[f] = x[i]
 
     x = coadd_healpix(cat[COORDS[0]],cat[COORDS[1]],NSIDES,nest=True)
@@ -349,14 +420,57 @@ def coadd_objects(data,bands=BANDS):
             x = coadd_class(d['CLASS_STAR'],labels,index)
             for i,f in enumerate(WAVGCLASS):
                 cat[bfields(f,b)][idx] = x[i]
-        except ValueError,msg:
-            logger.warning(msg)
+        except ValueError as e:
+            logger.warning(str(e))
 
         for i,(f,w) in enumerate(zip(FLAGS,WAVGFLAGS)):
             x = coadd_flags(d[f],labels,index)
             cat[bfields(w,b)][idx] = x
-        
+
     return cat,keys
+
+@verbose
+def calculate_extinction(cat,bands,ebvmap=None,coeff=None):
+    """ Calculate the E(B-V) and A_b extinction values.
+
+    Parameters
+    ----------
+    cat    : catalog
+    bands  : bands to calculate extinction for
+    ebvmap : ebvmap name or filepath (string)
+    
+    Returns
+    -------
+    cat    : catalog with extinction values filled
+    """
+    import extinction
+
+    if len(EBV) > 1 or len(EXTINCTION) > 1:
+        msg = "Only one extinction value supported"
+        raise Exception(msg)
+
+    if coeff is None: coeff = extinction.DR1
+        
+    ebv = EBV[0]
+    ra,dec = COORDS[0],COORDS[1]
+    cat[ebv] = extinction.ebv(cat[ra],cat[dec],ebvmap)
+
+    for b,f in zip(bands,bfields(EXTINCTION,bands)):
+        band = np.repeat(b,len(cat))
+        cat[f] = extinction.extinction(cat[ebv],band,coeff)
+
+    return cat
+
+@verbose
+def calculate_extended_class(cat,bands):
+    """ Calculate star-galaxy classification """
+    import classify
+
+    for b,f in zip(bands,bfields(EXTCLASS,bands)):
+        spread    = cat[bfields(SPREAD[0],b)]
+        spreaderr = cat[bfields(SPREAD[1],b)]
+        cat[f] = classify.extended_class(spread,spreaderr)
+    return cat
 
 def good_objects(data):
     """
@@ -367,6 +481,7 @@ def good_objects(data):
     - -99 < SPREAD_MODEL < 99
     - 0 < SPREADERR_MODEL < 99
     - FLAGS < 4
+    - SPLIT_FLAGS != 'merged'
 
     Parameters:
     -----------
@@ -382,10 +497,11 @@ def good_objects(data):
     # Only calibrated objects with 0 < MAG < BADMAG where 
     # MAG = MAG[ERR]_[PSF/AUTO] 
     # (There are a small number of spurious measurements with MAG > BADMAG)
-    mags = data[MAGS]
-    dtype = mags.dtype[0].str
-    sel &= np.all(mags.view(dtype).reshape((nobjs,-1))<BADMAG,axis=1)
-    sel &= np.all(mags.view(dtype).reshape((nobjs,-1))>0,axis=1)
+    columns = MAGS
+    mags = utils.unstructure(data[columns])
+
+    sel &= np.all(mags < BADMAG, axis=1)
+    sel &= np.all(mags > 0, axis=1)
 
     # Objects with valid spread_model and spreaderr values
     # 99 is chosen as the max of NUMBER(7,5) data type
@@ -398,8 +514,13 @@ def good_objects(data):
     #dtype = flags.dtype[0].str
     #sel &= np.all(flags.view(dtype).reshape((nobjs,-1)) < 4,axis=1)
 
+    # Only objects without merged split flags
+    if 'SPLIT_FLAGS' in data.dtype.names:
+        sel &= (data['SPLIT_FLAGS'] != 'merged')
+
     return data[sel]
 
+@verbose
 def quality_cuts(cat,key=None):
     """
     Prune down the catalog by selecting on detection band, etc.
@@ -408,11 +529,13 @@ def quality_cuts(cat,key=None):
     sel = np.zeros(nobjs,dtype=bool)
 
     # Objects with detections in the minimum number of bands.
-    # Careful with this, the 'view' can be dangerous...
     columns = bfields(['MAG_PSF'],BANDS)
-    dtype = cat.dtype[columns[0]]
-    mags = cat[columns].view(dtype).reshape((cat.size,-1))
-    sel |= (np.sum(mags < BADMAG,axis=1) >= MINBANDS)
+    # Hard to supress this (should be gone in numpy >= 1.16)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mags = utils.unstructure(cat[columns])
+
+    sel |= (np.sum(mags < BADMAG, axis=1) >= MINBANDS)
     
     """
     # Objects with r,i,z
@@ -435,16 +558,17 @@ def quality_cuts(cat,key=None):
         ksel = ~np.in1d(key[OBJECT_ID],cat[OBJECT_ID][~sel])
         return cat[sel],key[ksel]
 
+@verbose
 def check_keys(cat,key):
     """
     Check the number of non-unique objects against the number of
     measured magnitudes.
     """
-    nkey = (keys['UNIQUE_ID'] >0).sum()
+    nkey = (keys['UNIQUE_ID'] > 0).sum()
 
     columns = bfields(['MAG_PSF'],BANDS)
-    dtype = cat.dtype[columns[0]]
-    ncat = (cat[columns].view(dtype).reshape(len(cat),-1) < 90).sum()
+    mags = utils.unstructure(cat[columns])
+    ncat = (mags < BADMAG).sum()
 
     if ncat != nkey:
         msg = "Number of keys does not match catalog"
@@ -464,6 +588,7 @@ if __name__ == "__main__":
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-b','--bands',default=None,action='append')
     parser.add_argument('--min-bands',default=None,type=int)
+    parser.add_argument('--ebv',default=None)
     opts = parser.parse_args()
 
     if vars(opts).get('verbose'): logger.setLevel(logger.DEBUG)
@@ -487,11 +612,13 @@ if __name__ == "__main__":
         
     cat,key = coadd_objects(good,bands=BANDS)
     logger.info("Unique objects: %i"%len(cat))
+
+    cat = calculate_extinction(cat,bands=BANDS,ebvmap=opts.ebv)
+    cat = calculate_extended_class(cat,bands=BANDS)
  
     catalog,keys = quality_cuts(cat,key)
     check_keys(catalog,keys)
     logger.info("Quality objects: %i"%len(catalog))
-    #print catalog[bfields(['MAG_PSF'],BANDS)]
 
     if opts.outfile and len(catalog):
         logger.info("Writing %s..."%opts.outfile)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Utilities for calculating magnitudes from zeropoints.
+Utilities for applying zeropoints.
 """
 import os,shutil
 from os.path import splitext
@@ -9,9 +9,10 @@ from collections import OrderedDict as odict
 import logging
 
 import numpy as np
+import numpy.lib.recfunctions as rfn
 np.seterr(divide='ignore')
-import fitsio
 import pandas as pd
+import fitsio
 
 from ugali.utils.logger import logger
 import utils
@@ -22,59 +23,64 @@ ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
 OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
 
 def calc_mag(flux,zeropoint):
+    """ Calculate magnitude from flux and zeropoint using Pogson's law. """
     mag = -2.5 * np.log10(flux) + zeropoint
     mag[~np.isfinite(mag)] = BADMAG
     mag[(zeropoint>90)|(zeropoint<0)] = BADMAG
     return mag
 
 def calc_magerr(flux,fluxerr):
+    """ Calculate magnitude error from flux and flux error. """
     magerr = 2.5/np.log(10) * (fluxerr/flux)
     magerr[~np.isfinite(magerr)] = BADMAG
     return magerr
 
 def read_blacklist(blacklist):
+    """ Read the list of excluded exposures. 
+
+    Parameters
+    ----------
+    blacklist: filename or list of filenames
+
+    Returns
+    -------
+    bl : recarray of expnum, ccdnum to exclude
+    """
     if not blacklist: return None
-        
-    if isinstance(blacklist,basestring):
+
+    if utils.isstring(blacklist):
         ext = os.path.splitext(blacklist)[-1]
-        if ext == '.csv':
+        if blacklist.endswith(('.csv','.csv.gz')):
             bl = pd.read_csv(blacklist).to_records(index=False)
             bl.dtype.names = map(str.upper,bl.dtype.names)
-        elif ext == '.fits':
-            bl = fitsio.read(blacklist)
+        elif blacklist.endswith(('.fits','.fz','.fits.gz')):
+            bl = fitsio.read(blacklist,trim_strings=True)
         else:
             msg = "Unrecognized blacklist extension: %s"%ext
             raise Exception(msg)
     elif hasattr(blacklist,'__iter__'):
-        # A cleaner option?
-        #bllist = [read_blacklist(filename) for filename in blacklist]
-        #bl = recfn.stack_arrays(bllist,usemask=False,asrecarray=True)
-        for i,filename in enumerate(blacklist):
-            if i == 0:
-                bl = read_blacklist(filename)
-            else:
-                bl = np.append(bl,read_blacklist(filename))
+        bl = rfn.stack_arrays([read_blacklist(f) for f in blacklist],
+                              usemask=False,asrecarray=True)
     else:
         msg = 'Unrecognized blacklist: %s'%blacklist
         raise Exception(msg)
 
-    bl.dtype.names = map(str.upper,bl.dtype.names)
+    bl.dtype.names = list(map(str.upper,bl.dtype.names))
     return bl
 
 def read_zeropoint(zeropoint,blacklist=None):
     """ Read the zeropoints and apply the blacklist. """
 
-    ext = os.path.splitext(zeropoint)[-1]
-    if ext == '.csv':
-        #zp = np.recfromcsv(zeropoint)
+    if zeropoint.endswith(('.csv','.csv.gz')):
         zp = pd.read_csv(zeropoint).to_records(index=False)
         zp.dtype.names = map(str.upper,zp.dtype.names)
-    elif ext == '.fits':
+    elif zeropoint.endswith(('.fits','.fz','.fits.gz')):
         zp = fitsio.read(zeropoint,ext=1,columns=ZPCOLS)
     else:
-        msg = "Unrecognized zeropoint extension: %s"%ext
+        msg = "Unrecognized zeropoint: %s"%ext
         raise Exception(msg)
 
+    # Everything assumes zeropoints are positive
     # If necessary, change the sign of MAG_ZERO
     if (zp['MAG_ZERO'] < 0).sum()/float(len(zp)) > 0.90:
         msg = "Switching sign of MAG_ZERO."
@@ -82,13 +88,12 @@ def read_zeropoint(zeropoint,blacklist=None):
         zp['MAG_ZERO'] *= -1
         
     # reject CCDs with MAG_ZERO < 0
-    sel_zero = (zp['MAG_ZERO'] >= 0)
+    sel_zero = (zp['MAG_ZERO'] > 0)
     if (~sel_zero).sum():
         msg = "Found %i CCDs with negative zeropoints."%(~sel_zero).sum()
         logger.warning(msg)
         
-    # reject CCDs with QSLR_FLAGS > 0
-
+    # reject CCDs with FLAGS != 0
     sel_flags = (zp['ZP_FLAG'] == 0)
     if (~sel_flags).sum():
         msg = "Found %i CCDs with bad ZP flags."%(~sel_flags).sum()
@@ -100,6 +105,7 @@ def read_zeropoint(zeropoint,blacklist=None):
     if blacklist is None:
         return zp
     else:
+        logging.info("Excluding CCDs from %s..."%blacklist)
         bl = read_blacklist(blacklist)
         # Unique value from EXPNUM, CCDNUM
         zpval = utils.uid(zp['EXPNUM'],zp['CCDNUM'])
@@ -122,6 +128,7 @@ def zeropoint(data,zp):
     --------
     out  : catalog of calibrated magnitude and zeropoints
     """
+    # ADW: This could be made more efficient with pandas
     out = np.recarray(len(data),dtype=[(n,'f4') for n in OUTCOLS])
     out.fill(BADMAG)
     out['ZP_FLAG'].fill(BADZP)
@@ -146,6 +153,7 @@ def zeropoint(data,zp):
         didx =didx[inccd]
         d = d[inccd]
         
+        # This is trouble if there are CCDs with multiple ZPs...
         cidx = np.searchsorted(z['CCDNUM'],d['CCDNUM'])
 
         for x in ['PSF','AUTO']:

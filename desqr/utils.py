@@ -1,19 +1,24 @@
 #!/usr/bin/env python
-import shutil
 import os
+import time
+import shutil
 import itertools
 import glob
 from collections import OrderedDict as odict
+from functools import wraps
+import six
+import warnings
+import logging
 
 import numpy as np
+import numpy.lib.recfunctions as rfn
+from numpy.lib import NumpyVersion
 import fitsio
-import healpy
+import healpy as hp
 
 # Need to do better with the logging...
 from ugali.utils.logger import logger
 #import logging as logger
-import logging
-import warnings
 
 # Tools for working with the shell
 def pwd():
@@ -40,31 +45,59 @@ def mkscratch():
     else:
         raise Exception('...')
 
-def multiproc(func,args,kwargs):
+def set_defaults(kwargs,defaults):
+    for k,v in defaults.items():
+        kwargs.setdefault(k,v)
+    return kwargs
+setdefaults=set_defaults
+
+def mr_nice_guy(value=10):
+    """ Play nice. """
+    nice = os.nice(0)
+    os.nice(value-nice)
+
+def multiproc(func, arglist, kwargs={}, processes=20):
     """
     Wrapper around `apply_async` to call `funcs`.
 
-    func  : callable
-    args  : list of tuples
-    kwargs: dict
+    func      : callable
+    arglist   : list of argument tuples
+    kwargs    : dict
+    processes : number of processes
     """
-    from multiprocessing import Pool
 
-    nargs = len(args)
+    nargs = len(arglist)
     results = nargs*[None]
+    
+    # Use all CPUs [os.cpu_count()]
+    if processes <= 0: processes = None
+    
+    if processes == 1:
+        results = [func(*args,**kwargs) for args in arglist]
+    else:
+        from multiprocessing import Pool
+        pool = Pool(maxtasksperchild=1,processes=processes)
+        for i,args in enumerate(arglist):
+            def callback(result,i=i):
+                results[i] = result
+            res = pool.apply_async(func,args,kwargs,callback=callback)
+        pool.close()
+        pool.join()
+        del pool
 
-    pool = Pool(maxtasksperchild=1,processes=20)
-    for i,arg in enumerate(args):
-        def callback(result,i=i):
-            results[i] = result
-        res = pool.apply_async(func,arg,kwargs,callback=callback)
-    pool.close()
-    pool.join()
     return results
 
 def found(filename):
     #logger = logging.getLogger()
     logger.warning("Found %s; skipping..."%filename)
+
+def is_found(filename,force=False):
+    """" Return boolean if file is found. """
+    if os.path.exists(filename) and not force:
+        found(filename)
+        return True
+    else:
+        return False
 
 def which(program):
     # http://stackoverflow.com/q/377017
@@ -122,6 +155,11 @@ def write_fits(filename,data,header=None,force=False):
 
 write = write_fits
 
+def insert_header_key(filename, name, value, comment=None):
+    with fitsio.FITS(filename,'rw') as fits:
+        fits[1].write_key(name, value, comment="my comment")
+        
+
 def insert_columns(filename,data,ext=1,force=False,check=True):
     """
     Insert columns from a recarray into a table in an existing FITS
@@ -145,38 +183,38 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
         msg = "Requested file does not exist."
         raise IOError(msg)
 
-    fits = fitsio.FITS(filename,'rw')
-    oldnames = fits[ext].get_colnames()
-    newnames = data.dtype.names
-    overlap = np.in1d(oldnames,newnames)
+    # ADW: Better to use the context manager
 
-    if np.any(overlap) and not force:
-        logger.warning("Found overlapping columns; skipping...")
-        return
-    if len(data) != fits[ext].get_nrows():
-        logger.warning("Number of rows does not match; skipping...")
-        return
+    with fitsio.FITS(filename,'rw') as fits:
+        oldnames = fits[ext].get_colnames()
+        newnames = data.dtype.names
+        overlap = np.in1d(oldnames,newnames)
+         
+        if np.any(overlap) and not force:
+            logger.warning("Found overlapping columns; skipping...")
+            return
+        if len(data) != fits[ext].get_nrows():
+            logger.warning("Number of rows does not match; skipping...")
+            return
+         
+        # Test that at least one other column not corrupted during insert
+        test = None
+        if np.any(~overlap) and check:
+            idx = np.where(~overlap)[0][-1]
+            test = oldnames[idx]
+            orig = fits[ext].read(columns=[test])
+         
+        for col in newnames:
+            if col not in oldnames:
+                msg = "Inserting column %s"%col
+                logger.info(msg)
+                fits[ext].insert_column(col,data[col])
+            else:
+                msg = "Overwriting column %s"%col
+                logger.warning(msg)
+                fits[ext].write_column(col,data[col])
 
-    # Test that at least one other columns not corrupted during insert
-    test = None
-    if np.any(~overlap) and check:
-        idx = np.where(~overlap)[0][-1]
-        test = oldnames[idx]
-        orig = fits[ext].read(columns=[test])
-
-    for col in newnames:
-        if col not in oldnames:
-            msg = "Inserting column: %s"%col
-            logger.info(msg)
-            fits[ext].insert_column(col,data[col])
-        else:
-            msg = "Found column %s"%col
-            logger.warning(msg)
-            fits[ext].write_column(col,data[col])
-
-    fits.close()
-
-    # The file has been written, but might as well know...
+    # The file has already been written, but might as well know...
     if test and check:
         new = fitsio.read(filename,ext=ext,columns=[test])
         np.testing.assert_array_equal(new,orig,"Collateral damage: %s"%test)
@@ -197,39 +235,20 @@ def insert_index(filename,data,ext=1,force=False):
     cols.remove('OBJECT_NUMBER')
     insert_columns(filename,data[cols],ext,force)
 
-def ccdnum2(infile,outfile=None,force=True):
-    import pyfits
-
-    f = pyfits.open(infile)
-    names = np.char.upper(f[1].columns.names).tolist()
-
-    if 'CCDNUM' in names:
-        print('CCDNUM column already found; skipping...')
-        return
-
-    if outfile is None: outfile = infile
-    if os.path.exists(outfile) and not force:
-        found(outfile)
-        return
-
-    if not 'FILENAME' in names:
-        msg = 'FILENAME column not found.'
-        raise Exception(msg)
-
-    d = f[1].data
-    ccdnum = np.array([a[2].strip('c') for a in np.char.split(d['filename'],'_')],
-                      dtype=int)
-    idx = names.index('EXPNUM');
-    coldefs =  pyfits.ColDefs([
-            pyfits.Column(name='CCDNUM',format='I',array=ccdnum)
-            ])
-    hdu = pyfits.BinTableHDU.from_columns(d.columns[:idx+1]+coldefs+d.columns[idx+1:])
-
-    print("Writing %s..."%outfile)
-    hdu.writeto(outfile,clobber=force)
-
-
 def ccdnum(infile,outfile=None,force=True):
+    """ Grab the CCDNUM from the filename.
+
+    Parameters
+    ----------
+    infile  : input filename D{expnum:08d}_{band}_[c]{ccdnum}...
+    outfile : output filename
+    force   : overwrite existing CCDNUM column
+    
+    Returns
+    -------
+    None
+    """
+    
     if outfile is None: outfile = infile
     if os.path.exists(outfile) and not force:
         found(outfile)
@@ -261,43 +280,11 @@ def ccdnum(infile,outfile=None,force=True):
     f.close()
 
 def load(args):
-    #logger = logging.getLogger()
     infile,columns = args
     logger.debug("Loading %s..."%infile)
     return fitsio.read(infile,columns=columns)
 
-def load_infiles2(infiles,columns=None,multiproc=False):
-    #logger = logging.getLogger()
-    
-    if isstring(infiles):
-        infiles = [infiles]
-
-    logger.debug("Loading %s files..."%len(infiles))
-
-    args = zip(infiles,len(infiles)*[columns])
-
-    if multiproc:
-        from multiprocessing import Pool
-        processes = multiproc if multiproc > 0 else None
-        p = Pool(processes,maxtasksperchild=1)
-        out = p.map(load,args)
-    else:
-        out = [load(arg) for arg in args]
-
-    data = None
-    for i,d in enumerate(out):
-        if i == 0: 
-            data = d
-        elif d.dtype != data.dtype: 
-            # ADW: Not really safe...
-            data = np.append(data,d.astype(data.dtype))
-        else:
-            data = np.append(data,d)
-
-    return data
-
 def load_infiles(infiles,columns=None,multiproc=False):
-    #logger = logging.getLogger()
     if isstring(infiles):
         infiles = [infiles]
 
@@ -354,40 +341,48 @@ def get_pixels(dirname,filename=None):
     array = np.rec.fromarrays([pixels,filenames],names=['pixel','filename'])
     return array
 
-
 def uid(expnum,ccdnum):
+    """ Create unique float from EXPNUM, CCDNUM 
+    
+    Parameters
+    ----------
+    expnum : integer expnum 
+    ccdnum : integer ccdnum (1-62)
+    
+    Returns
+    -------
+    uid   : float constructed from expnum + ccdnum/100.
+    """
     return expnum + ccdnum/100.
 
 def ruid(uid):
+    """Extract EXPNUM, CCDNUM from unique float
+    
+    Parameters
+    ----------
+    uid   : float constructed from expnum + ccdnum/100.
+    
+    Returns
+    -------
+    expnum : integer expnum 
+    ccdnum : integer ccdnum
+    """
     uid = np.asarray(uid)
     expnum = np.floor(uid).astype(int)
     ccdnum = np.round(100 * (uid%1)).astype(int)
     return expnum,ccdnum
 
-# Not necessary anymore (pushed upstream to healpy)
-def pix2ang(nside, pix, nest=False):
-    """
-    Return (lon, lat) in degrees instead of (theta, phi) in radians
-    """
-    theta, phi =  healpy.pix2ang(nside, pix, nest)
-    lon = np.degrees(phi)
-    lat = 90. - np.degrees(theta)                    
-    return lon, lat
-
-def ang2pix(nside, lon, lat, nest=False):
-    """
-    Input (lon, lat) in degrees instead of (theta, phi) in radians
-    """
-    theta = np.radians(90. - lat)
-    phi = np.radians(lon)
-    return healpy.ang2pix(nside, theta, phi, nest)
+def file2pix(filenames):
+    filenames = np.atleast_1d(filenames).astype(str)
+    basenames = np.char.rpartition(filenames,'/')[:,-1]
+    pixels = np.char.rpartition(np.char.partition(basenames,'.')[:,0],'_')[:,-1]
+    return pixels.astype(int)
 
 def rename_column(data, old, new):
     """
-    Rename a column from old to new
+    Rename a column from old to new.
     """
     names = data.dtype.names
-
 
 def check_formula(formula):
     """ Check that a formula is valid. """
@@ -442,7 +437,6 @@ def add_column(filename,column,formula,force=False):
     insert_columns(filename,col,force=force)
     return True
 
-
 def get_vizier_catalog(ra,dec,radius=None,**kwargs):
     import warnings
     from astroquery.vizier import Vizier
@@ -472,26 +466,38 @@ def get_local_catalog(ra,dec,radius,catalog,**kwargs):
     cat : object catalog
     """
     from ugali.utils.healpix import ang2disc
-
+    name = catalog.lower()
     mapping = {}
-    if 'gaia' in catalog.lower():
+    if name in ('gaia_dr1'):
+        nside=32
+        dirname = '/data/des40.b/data/gaia/dr1/healpix'
+        basename = 'GaiaSource_%05d.fits'
+        columns = ['SOURCE_ID','RA','DEC']
+        #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
+    elif name in ('gaia','gaia_dr2'): # Default...
         nside=32
         dirname = '/data/des40.b/data/gaia/dr2/healpix'
         basename = 'GaiaSource_%05d.fits'
         columns = ['SOURCE_ID','RA','DEC']
-        mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
-    elif 'atlas' in catalog.lower():
+        #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
+    elif name in ('gaia_edr3'):
+        nside=32
+        dirname = '/data/des40.b/data/gaia/edr3/healpix'
+        basename = 'GaiaSource_%05d.fits'
+        columns = ['SOURCE_ID','RA','DEC']
+        #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
+    elif 'atlas' in name:
         nside = 32
         dirname = '/data/des40.b/data/atlas-refcat2/healpix'
         basename = 'atlas-refcat2_%05d.fits'
         columns = ['OBJID','RA','DEC','G']
         mapping.update({})
-    elif 'ps1' in catalog.lower():
+    elif 'ps1' in name:
         nside = 32
         dirname = '/data/des40.b/data/ps1/dr1/healpix'
         basename = 'ps1_dr1_%05d.fits'
         columns = ['RA','DEC']
-    elif 'decals' in catalog.lower():
+    elif 'decals' in name:
         nside = 32
         dirname = '/data/des40.b/data/decals/dr8/south_healpix'
         basename = 'decals-dr8-sweep_%05d.fits'
@@ -508,10 +514,21 @@ def get_local_catalog(ra,dec,radius,catalog,**kwargs):
     cat.dtype.names = names
     return cat
         
-
 def print_problem(msg):
     import termcolor as color
     print(color(msg,'red'))
+
+def print_statistics(hpxmap):
+    q = [5,16,50,84,95]
+    p = np.nanpercentile(hpxmap[np.isfinite(hpxmap)],q)
+    s68 = (p[3]-p[1])
+    std = np.nanstd(hpxmap[np.isfinite(hpxmap)])
+        
+    print("  [%.0f,%.0f,%.0f]%%: %0.1f/%0.1f/%0.1f"%(q[0],q[2],q[4],p[0],p[2],p[4]))
+    print("  68%% Interval: %0.1f"%(s68))
+    print("  STDEV: %0.1f"%(std))
+
+    return p,s68,std
 
 def set_memory_limit(mlimit):
     """Set the (soft) memory limit for setrlimit.
@@ -529,3 +546,128 @@ def set_memory_limit(mlimit):
     resource.setrlimit(rsrc, (mlimit, mlimit))
     return resource.getrlimit(rsrc)
 
+def verbose(func):
+    """
+    Decorator for timing functions
+
+    Parameter
+    ---------
+    func : function to wrap
+    
+    Returns
+    -------
+    wrapper : wrapped function
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.debug("Running %r..."%(func.__name__))
+        t0=time.time()
+        ret = func(*args,**kwargs)
+        logger.debug('%4.2fs'%(time.time()-t0))
+        return ret
+
+    return wrapper
+
+def ignore_warning(warning=None):
+    """
+    Decorator to ignore a given warning occurring during method execution.
+    https://stackoverflow.com/a/70292317
+
+    Parameters
+    ----------
+    warning : Warning type or None
+    
+    Returns
+    -------
+    inner : wrapped function
+    """
+
+    def inner(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with warnings.catch_warnings():
+                if warning: warnings.filterwarnings("ignore", category=warning)
+                else: warnings.filterwarnings("ignore")
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return inner
+
+# Some default healpix maps
+def empty(nside,dtype=int): 
+    return np.zeros(hp.nside2npix(nside),dtype=dtype)
+
+def blank(nside,dtype=float): 
+    return np.nan*np.ones(hp.nside2npix(nside),dtype=dtype)
+
+def unseen(nside,dtype=float): 
+    return hp.UNSEEN*np.ones(hp.nside2npix(nside),dtype=dtype)
+
+def unstructure(arr):
+    """Convert structured array to unstructured array.
+
+    Poor stop-gap for recfunctions.structured_to_unstructured 
+    in numpy >= 1.16.0
+
+    Parameters
+    ----------
+    arr : Structured array to convert
+
+    Returns
+    -------
+    unstructured : Unstructured array
+    """
+    if NumpyVersion(np.__version__) >= '1.16.0':
+        return rfn.structured_to_unstructured(arr)
+    else:
+        out = rfn.repack_fields(arr.copy())
+        dtype = out.dtype[0].str
+        return out.view(dtype).reshape(len(out),-1)
+
+def rec_append_fields(rec, names, arrs, dtypes=None):
+    """
+    Re-implement mlab.rec_append_fields for speed.
+
+    Return a new record array with field names populated with data
+    from arrays in *arrs*.  If appending a single field, then *names*,
+    *arrs* and *dtypes* do not have to be lists. They can just be the
+    values themselves.
+
+    Parameters
+    ----------
+    rec    : recarray
+    names  : names of new fields
+    arrs   : values of new fields
+    dtypes : dtypes of new fields
+
+    Returns
+    -------
+    rec : recarray with fields appended
+    """
+    if (not isstring(names) and iterable(names) and len(names) and isstring(names[0])):
+        if len(names) != len(arrs):
+            raise ValueError("number of arrays do not match number of names")
+    else:  # we have only 1 name and 1 array
+        names = [names]
+        arrs = [arrs]
+    arrs = list(map(np.asarray, arrs))
+    if dtypes is None:
+        dtypes = [a.dtype for a in arrs]
+    elif not iterable(dtypes):
+        dtypes = [dtypes]
+    if len(arrs) != len(dtypes):
+        if len(dtypes) == 1:
+            dtypes = dtypes * len(arrs)
+        else:
+            raise ValueError("dtypes must be None, a single dtype or a list")
+    old_dtypes = rec.dtype.descr
+    if six.PY2:
+        old_dtypes = [(name.encode('utf-8'), dt) for name, dt in old_dtypes]
+    newdtype = np.dtype(old_dtypes + list(zip(names, dtypes)))
+    newrec = np.recarray(rec.shape, dtype=newdtype)
+    for field in rec.dtype.fields:
+        newrec[field] = rec[field]
+    for name, arr in zip(names, arrs):
+        newrec[name] = arr
+    return newrec

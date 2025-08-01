@@ -237,8 +237,39 @@ and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
 and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
     return query
 
-def y6a2_object_query(pfw_attempt_id,tag='Y6A2_COADD_INPUT'):
+def y6a1_object_query(pfw_attempt_id,tag='Y6A1_COADD_INPUT'):
+    """ Download objects from Y6A1_FINALCUT_OBJECT """
+    kwargs = dict(pfw_attempt_id=pfw_attempt_id,tag=tag)
+    query = """-- Single-epoch catalog download
+-- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux
+-- CAST strings to save space
+SELECT CAST(o.FILENAME as VARCHAR(48)) as FILENAME, 
+    qa.PFW_ATTEMPT_ID, CAST(t.tag AS VARCHAR(13)) as TAG,
+    qa.EXPNUM, c.CCDNUM,
+    CAST(o.BAND AS VARCHAR(1)) AS BAND, qa.T_EFF, 
+    o.FWHM_WORLD, o.FLAGS, 
+    o.OBJECT_NUMBER, 
+    o.RA, o.DEC,
+    o.FLUX_PSF, o.FLUXERR_PSF,
+    o.FLUX_AUTO, o.FLUXERR_AUTO,
+    o.A_IMAGE, o.B_IMAGE, o.THETA_IMAGE,
+    o.CLASS_STAR, o.SPREAD_MODEL, o.SPREADERR_MODEL,
+    o.IMAFLAGS_ISO, e.MJD_OBS, e.EXPTIME
+FROM Y6A1_FINALCUT_OBJECT o, Y6A1_QA_SUMMARY qa, 
+    Y6A1_PROCTAG t, Y6A1_EXPOSURE e,
+    Y6A1_CATALOG c
+WHERE c.pfw_attempt_id = %(pfw_attempt_id)i
+    and c.pfw_attempt_id = t.pfw_attempt_id 
+    and c.pfw_attempt_id = qa.pfw_attempt_id
+    and qa.expnum = e.expnum
+    and t.tag = '%(tag)s' and o.filename = c.filename
+    and o.FLUX_PSF > 0 and o.FLUX_AUTO > 0 and o.FLAGS < 4
+    and (o.IMAFLAGS_ISO is NULL or BITAND(o.IMAFLAGS_ISO,2047) = 0)
+    and 1.0857362*(o.fluxerr_psf/o.flux_psf) < 0.5;"""%kwargs
+    return query
 
+def y6a2_object_query(pfw_attempt_id,tag='Y6A2_COADD_INPUT'):
+    """ Download objects from Y6A2_FINALCUT_OBJECT """
     kwargs = dict(pfw_attempt_id=pfw_attempt_id,tag=tag)
     query = """-- Single-epoch catalog download
 -- magerr = 2.5/ln(10) * fluxerr/flux = 1.0857362 * fluxerr/flux

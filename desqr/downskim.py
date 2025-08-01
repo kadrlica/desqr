@@ -23,13 +23,14 @@ except ModuleNotFoundError:
 
 
 # Order defined below
+local = './data/{dirname}/{expnum}'
 des70 = '/data/des70.c/data/BLISS/{dirname}/{expnum}'
 des50 = '/data/des50.b/data/BLISS/{dirname}/{expnum}'
 des60 = '/data/des60.b/data/BLISS/{dirname}/{expnum}'
 des61 = '/data/des61.b/data/BLISS/{dirname}/{expnum}'
-filebase = 'D{expnum:08d}_*_fullcat.fits'
+filebase = 'D{expnum:08d}_*fullcat.fits'
 
-PATHS = [os.path.join(dirname,filebase) for dirname in [des70,des50,des60,des61]]
+PATHS = [os.path.join(dirname,filebase) for dirname in [local,des70,des50,des60,des61]]
 
 #print("WARNING: NGC55 hack")
 #PATHS = ['/home/s1/kadrlica/projects/delve/deep/v1/data/{dirname}/{expnum}/D00{expnum}_*-fullcat.fits']
@@ -38,6 +39,8 @@ PATHS = [os.path.join(dirname,filebase) for dirname in [des70,des50,des60,des61]
 DTYPES = [('FILENAME', 'S48'), ('PFW_ATTEMPT_ID', '>i8'), ('TAG', 'S13'), ('UNITNAME', 'S9'), ('REQNUM', '>i4'), ('ATTNUM', '>i2'), ('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('FLAGS', '>i2'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'),('IMAFLAGS_ISO','>i2'),('MJD_OBS','>f8'),('EXPTIME','>f4')]
 # New reduced column set...
 #DTYPES = [('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('TAG', 'S13'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('MJD_OBS','>f8'), ('EXPTIME','>f4'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('KRON_RADIUS', '>f4'), ('FLUX_RADIUS', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'), ('FLAGS', '>i2'), ('IMAFLAGS_ISO','>i2')]
+
+#ZP_DTYPES = [('EXPNUM', '>i8'), ('CCDNUM', '>i2'), ('BAND', 'S1'), ('TAG', 'S13'), ('T_EFF', '>f4'), ('FWHM_WORLD', '>f4'), ('MJD_OBS','>f8'), ('EXPTIME','>f4'), ('OBJECT_NUMBER', '>i4'), ('RA', '>f8'), ('DEC', '>f8'), ('FLUX_PSF', '>f4'), ('FLUXERR_PSF', '>f4'), ('FLUX_AUTO', '>f4'), ('FLUXERR_AUTO', '>f4'), ('A_IMAGE', '>f4'), ('B_IMAGE', '>f4'), ('THETA_IMAGE', '>f4'), ('KRON_RADIUS', '>f4'), ('FLUX_RADIUS', '>f4'), ('CLASS_STAR', '>f4'), ('SPREAD_MODEL', '>f4'), ('SPREADERR_MODEL', '>f4'), ('FLAGS', '>i2'), ('IMAFLAGS_ISO','>i2')]
 
 TAG = ''
 

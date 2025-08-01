@@ -33,7 +33,6 @@ if __name__ == "__main__":
     config = yaml.safe_load(open(args.config))
     zpsdir = mkdir(config['zpsdir'])
     explist = config['explist']
-    section = config.get('db','bliss')
 
     chunk = 1 if args.chunk is None else args.chunk
 
@@ -41,8 +40,10 @@ if __name__ == "__main__":
     exposures.dtype.names = [str(n).lower() for n in exposures.dtype.names]
     
     #Hack to subselect exposures
-    #sel = (exposures['teldec'] > -40) & (exposures['teldec'] < -20)
-    #exposures = exposures[sel]
+    sel = np.ones(len(exposures),dtype=bool)
+    #sel &= (exposures['teldec'] > -40) & (exposures['teldec'] < -20)
+    #sel &= (exposures['propid'] == '2012B-0001')
+    exposures = exposures[sel]
 
     bands = config['bands'] if args.band is None else args.band
     outbase = config['zpsbase']
@@ -71,10 +72,11 @@ if __name__ == "__main__":
 
                 edict = dict(zip(e.dtype.names,e))
                 filename = outfile.format(**edict)
-                procfile = os.path.join(e['path'],procbase.format(**edict))
                 # If processing log modified more recently than zp
                 # Use try/except to minimize filesystem calls
-                if not args.force:
+                # NOTE: Remove first os.path.exists(filename) for speed
+                if not args.force and os.path.exists(filename):
+                    procfile = os.path.join(e['path'],procbase.format(**edict))
                     try:
                         if getmtime(procfile) < getmtime(filename): 
                             # Both files exist and processing is older

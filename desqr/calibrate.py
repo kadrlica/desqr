@@ -29,32 +29,35 @@ import utils
 from ugali.utils.healpix import ang2disc
 
 SURVEYS = ['refcat2','desdr2']
-UID     = 'FILENAME'
-#UID     = ['EXPNUM','CCDNUM']
+#UID     = 'FILENAME'
 #FLUX    = 'FLUX_APER_08'
 #FLUXERR = 'FLUXERR_APER_08'
 FLUX    = 'FLUX_PSF'
 FLUXERR = 'FLUXERR_PSF'
-DTYPES = downskim.DTYPES 
+DTYPES = downskim.DTYPES
 if FLUX not in [d[0] for d in DTYPES]:    DTYPES += [(FLUX, '>f4')]
 if FLUXERR not in [d[0] for d in DTYPES]: DTYPES += [(FLUXERR, '>f4')]
 
-REFCAT_COLUMNS = ['OBJID','RA','DEC','DUPVAR',
+REFCAT2_COLUMNS = ['OBJID','RA','DEC','DUPVAR',
                   'G','DG','GCHI','GCONTRIB',
                   'R','DR','RCHI','RCONTRIB',
                   'I','DI','ICHI','ICONTRIB',
                   'Z','DZ','ZCHI','ZCONTRIB',
                   ]
 
-DESDR2_COLUMNS = ['COADD_OBJECT_ID','RA','DEC',
-                  'WAVG_MAG_PSF_G','WAVG_MAGERR_PSF_G',
-                  'WAVG_MAG_PSF_R','WAVG_MAGERR_PSF_R',
-                  'WAVG_MAG_PSF_I','WAVG_MAGERR_PSF_I',
-                  'WAVG_MAG_PSF_Z','WAVG_MAGERR_PSF_Z']
+DESDR2_MAPPING = odict([
+    ('COADD_OBJECT_ID','OBJID'), ('RA','RA'), ('DEC','DEC'),
+    ('WAVG_MAG_PSF_G','G'), ('WAVG_MAGERR_PSF_G','DG'),
+    ('WAVG_MAG_PSF_R','R'), ('WAVG_MAGERR_PSF_R','DR'),
+    ('WAVG_MAG_PSF_I','I'), ('WAVG_MAGERR_PSF_I','DI'),
+    ('WAVG_MAG_PSF_Z','Z'), ('WAVG_MAGERR_PSF_Z','DZ'),
+])
+DESDR2_COLUMNS = list(DESDR2_MAPPING.keys())
 
 # https://archive.stsci.edu/prepds/atlas-refcat2/
 PS1_CONTRIB_BIT = 2**1
 SKY_CONTRIB_BIT = 2**2
+REFCAT2_SPLIT_DEC = -30 # Declination split (deg)
 
 INTERP_DIR = '/home/s1/kadrlica/projects/delve/calib/v4/interp'
 
@@ -154,6 +157,60 @@ REFCAT2_INTERP = odict([
     ]),
 ])
 
+# New from Chin Yi 2022-06-22
+REFCAT2_DECADE_INTERP = odict([
+    ('g', [
+        ['transInterp.ref2_to_des.g_gr_ref2_North_v3.csv',+2.5],
+        ['transInterp.ref2_to_des.g_gr_ref2_South_v3.csv',+2.5],
+    ]),
+    ('r', [
+        ['transInterp.ref2_to_des.r_gr_ref2_North_v3.csv',-0.4],
+        ['transInterp.ref2_to_des.r_gr_ref2_South_v3.csv',+0.8],
+     ]),
+    ('i', [
+        ['transInterp.ref2_to_des.i_iz_ref2_North_v3.csv',+0.4],
+        ['transInterp.ref2_to_des.i_iz_ref2_South_v3.csv',-1.0]
+    ]),
+    ('z', [
+        ['transInterp.ref2_to_des.z_iz_ref2_North_v3.csv',-3.1],
+        ['transInterp.ref2_to_des.z_iz_ref2_South_v3.csv',-2.3]
+    ]),
+])
+
+# From Chin Yi DELVE FNAL 2022-07-01
+REFCAT2_INTERP = odict([
+    ('g', [
+        ['transInterp.ref2_to_des.g_gr_ref2_North_v3.csv',+3.1-0.1],
+        ['transInterp.ref2_to_des.g_gr_ref2_South_v3.csv',+2.4+1.2],
+    ]),
+    ('r', [
+        ['transInterp.ref2_to_des.r_gr_ref2_North_v3.csv',-0.2+0.0],
+        ['transInterp.ref2_to_des.r_gr_ref2_South_v3.csv',+1.8-0.3],
+     ]),
+    ('i', [
+        ['transInterp.ref2_to_des.i_iz_ref2_North_v3.csv',-0.0-0.1],
+        ['transInterp.ref2_to_des.i_iz_ref2_South_v3.csv',-0.5-0.4]
+    ]),
+    ('z', [
+        ['transInterp.ref2_to_des.z_iz_ref2_North_v3.csv',-1.0+0.1],
+        ['transInterp.ref2_to_des.z_iz_ref2_South_v3.csv',-3.8+1.2]
+    ]),
+])
+
+def snr_to_magerr(snr):
+    """Convert signal-to-noise ratio to magnitude error using Pogson's law
+    (e.g., Rykoff et al. 2014).
+
+    Parameters
+    ----------
+    snr : signal-to-noise ratio
+    
+    Returns
+    -------
+    magerr : magnitude error
+    """ 
+    return (2.5/np.log(10)) * snr**-1
+
 def linear_to_des(dataFrame, band, coeff, colnames):
     """ Simple transformation equations.
     
@@ -174,6 +231,8 @@ def linear_to_des(dataFrame, band, coeff, colnames):
     magStdColName,magerrStdColName = colnames
     # Transformation coefficients
     A = coeff
+
+    logging.debug("Band: %s"%band)
 
     if band is 'g':
         # g_des = g_ps + 0.0994*(g-r)_ps - 0.0076    [-0.2 < (g-r)_ps <= 1.2]
@@ -234,9 +293,6 @@ def interp_to_des(dataFrame, band, interps, colnames):
     # Output column names
     magStdColName,magerrStdColName = colnames
 
-    # Declination split
-    split = -30 # Declination split (deg)
-
     if band in ['g','r']: 
         logging.info("Interpolating in (g-r) color...")
         color = dataFrame['G']-dataFrame['R']
@@ -247,14 +303,14 @@ def interp_to_des(dataFrame, band, interps, colnames):
     # Offset to go from reference to DECam
     offset = np.zeros(len(dataFrame), dtype=float)
 
-    # For interpolation
+    # Interpolation keyword arguments
     kwargs = dict(bounds_error=False, fill_value=0., kind='linear')
 
     # Fill offset for objects in the north
-    north_sel = dataFrame['DEC'] > split
+    north_sel = dataFrame['DEC'] > REFCAT2_SPLIT_DEC
     if north_sel.sum():
         filename=os.path.join('interp',interps[band][0][0])
-        shift= interps[band][0][1]
+        shift = interps[band][0][1]/1000. #mmag
         logging.info("North: %s"%filename)
         df_interp_north = pd.read_csv(filename)  
         interp_north = interpolate.interp1d(df_interp_north.bin_label.values.astype(float),
@@ -262,10 +318,10 @@ def interp_to_des(dataFrame, band, interps, colnames):
         offset[north_sel] = interp_north(color)[north_sel] + shift
 
     # Fill offset for objects in the south
-    south_sel = dataFrame['DEC'] <= split
+    south_sel = dataFrame['DEC'] <= REFCAT2_SPLIT_DEC
     if south_sel.sum():
         filename=os.path.join('interp',interps[band][1][0])
-        shift= interps[band][1][1]
+        shift = interps[band][1][1]/1000. #mmag
         logging.info("South: %s"%filename)
         df_interp_south = pd.read_csv(filename)  
         interp_south = interpolate.interp1d(df_interp_south.bin_label.values.astype(float),
@@ -299,7 +355,6 @@ def interp_to_des(dataFrame, band, interps, colnames):
         raise ValueError(msg)
 
     return dataFrame, mask
-
 
 def compare_methods(dataFrame,band):
     logging.info("Comparing transform methods...")
@@ -346,7 +401,6 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     logging.info("Starting to derive zeropoints...")
     logging.debug(datetime.datetime.now())
 
-    aggFieldColName   = UID
     fluxObsColName    = FLUX
     fluxerrObsColName = FLUXERR
 
@@ -362,7 +416,7 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
         dataFrame, mask = interp_to_des(dataFrame.copy(), band, INTERP, 
                                         colnames=cols)
 
-    # Add a 'MAG_OBS' column and a 'MAG_DIFF' column to the pandas DataFrame...
+    # Add a 'MAG_OBS' column and a 'MAG_DIFF' column to the DataFrame...
     dataFrame['MAG_OBS'] = -2.5*np.log10(dataFrame[fluxObsColName])
     dataFrame['MAG_DIFF'] = dataFrame[magStdColName]-dataFrame['MAG_OBS']
 
@@ -381,16 +435,14 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     mask1  = ( (df[magStdColName] >= 0.) & (df[magStdColName] <= 25.) )
     mask1 &= ( (df['FLUX_PSF'] > 10.) & (df['FLAGS'] < 2) & (np.abs(df['SPREAD_MODEL']) < 0.01) )
 
-    # SNR cut for reference catalog stars
+    # SNR cut for catalog stars
     SNR = 10.
-    MAGERR = (2.5/np.log(10)) * SNR**-1
+    MAGERR = snr_to_magerr(SNR)
 
-    # Select catalog SNR
+    # Select catalog based on SNR
     if FLUXERR in df.columns:
         mask1 &= (df[FLUX]/df[FLUXERR]) > SNR
-
-    # Select reference SNR
-    if magerrStdColName in df.columns:
+    elif magerrStdColName in df.columns:
         mask1 &= (df[magerrStdColName] < MAGERR)
 
     # Reject outliers of more than 5 mag from the mean (ADW: why so big?)
@@ -408,7 +460,7 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
         raise RuntimeError(msg)
 
     ###############################################
-    # Aggregate by aggFieldColName
+    # Aggregate by EXPNUM, CCDNUM
     ###############################################
 
     # Iterate over the copy of dataFrame 3 times, removing outliers...
@@ -423,9 +475,8 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
         newdf = df[mask].copy()
         del df
 
-        # group by aggFieldColName...
-        grpnewdf = newdf.groupby(aggFieldColName)
-        #grpnewdf = newdf.groupby(['EXPNUM','CCDNUM'])
+        # group by expnum,ccdnum
+        grpnewdf = newdf.groupby(['EXPNUM', 'CCDNUM'])
 
         # add/update new columns to newdf
         newdf['Outlier']  = grpnewdf['MAG_DIFF'].transform( lambda x: abs(x-x.mean()) > nsig*x.std() )
@@ -440,7 +491,9 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     # Perform pandas grouping/aggregating functions on sigma-clipped Data Frame...
     logging.info('Performing grouping/aggregating...')
     # These are unique columns (save space with float32)
-    columns = [aggFieldColName,'EXPNUM','CCDNUM','BAND','EXPTIME','T_EFF']
+    columns = ['EXPNUM','CCDNUM','BAND','EXPTIME']
+    if 'FILENAME' in df.columns: columns.append('FILENAME')
+    if 'T_EFF' in df.columns: columns.append('T_EFF')
     groupedDataFrame = df.groupby(columns)
     magZeroMedian = groupedDataFrame['MAG_DIFF'].median().astype(np.float32)
     magZeroMean   = groupedDataFrame['MAG_DIFF'].mean().astype(np.float32)
@@ -482,22 +535,32 @@ def read_refcat(ra,dec,radius=1.5):
     dirname = '/data/des40.b/data/atlas-refcat2/healpix'
     basename = 'atlas-refcat2_%05d.fits'
     filenames = [os.path.join(dirname,basename%p) for p in pixels]
-    columns = REFCAT_COLUMNS
+    columns = REFCAT2_COLUMNS
     refcat = utils.load_infiles(filenames,columns=columns)
 
     # Catalog quality cuts...
-    SNR = 30.
-    MAGERR = (2.5/np.log(10)) * SNR**-1
     sel = np.in1d(refcat['DUPVAR'],[0,2]) # constant/unknown and non-duplicate
     for band in ['G','R','I','Z']:
-        sel &= (refcat['D'+band] <= MAGERR)
         sel &= (refcat[band+'CHI'] <= 10)
         sel &= (refcat[band+'CONTRIB'] & (PS1_CONTRIB_BIT | SKY_CONTRIB_BIT) > 0)
+
+    # Refcat2 SNR cuts
+    SNR_NORTH = 30.
+    MAGERR_NORTH = snr_to_magerr(SNR_NORTH)
+
+    SNR_SOUTH = 20.
+    MAGERR_SOUTH = snr_to_magerr(SNR_SOUTH)
+
+    north = (refcat['DEC']  > REFCAT2_SPLIT_DEC)
+    south = (refcat['DEC'] <= REFCAT2_SPLIT_DEC)
+    for band in ['G','R','I','Z']:
+        sel[north] &= (refcat[north]['D'+band] <= MAGERR_NORTH)
+        sel[south] &= (refcat[south]['D'+band] <= MAGERR_SOUTH)
 
     return refcat[sel]
 
 def read_desdr2(ra,dec,radius=1.5):
-    """ Read the reference catalog in a localized region.
+    """ Read the DES DR2 catalog in a localized region of healpix.
 
     Parameters
     ----------
@@ -512,16 +575,20 @@ def read_desdr2(ra,dec,radius=1.5):
     
     nside = 32
     pixels = ang2disc(nside, ra, dec, radius, inclusive=True)
-    dirname = '/data/des40.b/data/y6a1/gold/1.1/healpix'
-    basename = 'y6_gold_1_0_%05d.fits'
+    dirname = '/data/des40.b/data/des/dr2/healpix'
+    basename = 'dr2_main_%05d.fits'
     filenames = [os.path.join(dirname,basename%p) for p in pixels]
-    #filenames = [f for f in filenames if os.path.exists(f)]
+    filenames = [f for f in filenames if os.path.exists(f)]
+    if len(filenames) == 0:
+        raise Exception("No overlapping files from DES DR2.")
+
     columns = DESDR2_COLUMNS
     refcat = utils.load_infiles(filenames,columns=columns)
     refcat = refcat[refcat['WAVG_MAG_PSF_R'] < 21]
+    # Might want to apply a stellar selection here, but one is already
+    # applied to input exposure later...
 
-    mapping = dict(zip(DESDR2_COLUMNS,REFCAT_COLUMNS))
-    new_names = [mapping[n] for n in refcat.dtype.names]
+    new_names = [DESDR2_MAPPING[n] for n in refcat.dtype.names]
     refcat.dtype.names = new_names
 
     return refcat
@@ -652,6 +719,7 @@ if __name__ == "__main__":
 
     explist = pd.read_csv(args.explist).to_records(index=False)
     explist.dtype.names = [str(n).lower() for n in explist.dtype.names]
+    explist['band'] = np.char.lower(explist['band'].astype(str))
 
     #exp = explist[explist['EXPNUM'] == args.expnum]
     #if len(exp) == 0:

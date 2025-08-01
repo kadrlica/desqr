@@ -85,13 +85,14 @@ def confusion_matrix(class_pos,class_neg,true_pos,true_neg,mag=None,bins=None):
     ret.update(TPR=TPR, FNR=FNR, TNR=TNR, FPR=FPR)
     ret.update(PPV=PPV, FDR=FDR, FOR=FOR, NPV=NPV)
     ret.update(ACC=ACC,PRV=PRV,PLR=PLR,NLR=NLR)
-    ret.update(true_npos=true_npos,true_nneg=true_nneg)
     ret.update(P=true_npos,N=true_nneg)
-    ret.update(class_npos=class_npos,class_nneg=class_nneg)
-
     # Also define lowercase aliases
     for key,val in list(ret.items()):
         ret[key.lower()] = val
+
+    ret.update(true_npos=true_npos,true_nneg=true_nneg)
+    ret.update(class_npos=class_npos,class_nneg=class_nneg)
+    ret.update(mag=mag, bins=bins)
 
     if scalar:
         for key,val in ret.items():

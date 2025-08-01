@@ -62,7 +62,7 @@ def multiproc(func, arglist, kwargs={}, processes=20):
 
     func      : callable
     arglist   : list of argument tuples
-    kwargs    : dict
+    kwargs    : keyword arguments shared across calls
     processes : number of processes
     """
 
@@ -284,7 +284,7 @@ def load(args):
     logger.debug("Loading %s..."%infile)
     return fitsio.read(infile,columns=columns)
 
-def load_infiles(infiles,columns=None,multiproc=False):
+def load_infiles(infiles, columns=None, multiproc=False):
     if isstring(infiles):
         infiles = [infiles]
 
@@ -671,3 +671,46 @@ def rec_append_fields(rec, names, arrs, dtypes=None):
     for name, arr in zip(names, arrs):
         newrec[name] = arr
     return newrec
+
+def tilename2radec(tilename):
+    """ Convert tilename string (i.e., DESXXXX+YYYY) to RA, Dec.
+
+    Parameters
+    ----------
+    tilename : pandas.Series with string
+    
+    Returns
+    -------
+    ra,dec : RA, Dec in decimal degrees
+    """
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    hms = tilename.str[3:5]+':'+tilename.str[5:7]+':00'
+    dms = tilename.str[7:10]+':'+tilename.str[10:12]+':00'
+    coord = SkyCoord(hms,dms,unit=(u.hourangle,u.degree))
+    return coord.ra.deg, coord.dec.deg
+
+tile2cel = tilename2radec
+tile2radec = tilename2radec
+
+def filename2tilename(filenames):
+    """ 
+    Strip tilename from filename. Assumes filename is structured as:
+        */*_TILENAME.*
+    """
+
+    filenames = np.array(filenames)
+    suffix = np.char.rpartition(filenames,'_')[:,-1]
+    tilename = np.char.partition(suffix, '.')[:,0]
+    return tilename
+
+def filename2healpix(filenames):
+    """ 
+    Strip healpix pixel from filename. Assumes filename is structured as:
+        */*_HEALPIX.*
+    """
+    filenames = np.array(filenames)
+    suffix = np.char.rpartition(filenames,'_')[:,-1]
+    healpix = np.char.partition(suffix, '.')[:,0].astype(int)
+    return healpix

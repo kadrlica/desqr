@@ -23,13 +23,17 @@ import ugali.utils.healpix as healpix
 from ugali.utils.projector import cel2gal
 from ugali.utils.logger import logger
 
-import utils
+try:
+    import desqr.utils as utils
+except ModuleNotFoundError:
+    import utils
 
 
 BANDS = ['g','r','i','z','Y','y']
 
-# Rv = 3.1
+# DES delta(m)/E(B-V) at Rv = 3.1
 # Schlafly & Finkbeiner ApJ 737, 103 (2011)
+# https://iopscience.iop.org/article/10.1088/0004-637X/737/2/103/pdf
 SCHLAFLY11 = odict([
         ('g',3.237), 
         ('r',2.176), 
@@ -92,12 +96,12 @@ DR2 = DR1
 # From Table 6 in Schlafly 2011 with Rv = 3.1
 # http://iopscience.iop.org/article/10.1088/0004-637X/737/2/103/pdf
 PS1 = odict([
-        ('g',3.172),
-        ('r',2.271),
-        ('i',1.682),
-        ('z',1.322),
-        ('y',1.087),
-        ('w',2.341),
+        ('g', 3.172 ),
+        ('r', 2.271 ),
+        ('i', 1.682 ),
+        ('z', 1.322 ),
+        ('y', 1.087 ),
+        ('w', 2.341 ),
         ])
 
 OUTCOLS  = ['EXTINCTION','EBV']
@@ -140,6 +144,7 @@ def writefile(filename,data,force=False):
 
 @utils.ignore_warning(UserWarning)
 def ebv(ra,dec,ebvmap=None):
+    """Calculate E(B-V) value by interpolating a map."""
     ra = np.atleast_1d(ra)
     dec = np.atleast_1d(dec)
 
@@ -147,7 +152,7 @@ def ebv(ra,dec,ebvmap=None):
         msg = "Column lengths must match"
         raise Exception(msg)
 
-    if ebvmap is None or ebvmap.lower() == 'sfd':
+    if ebvmap is None or (utils.isstring(ebvmap) and ebvmap.lower() == 'sfd'):
         # Download SFD map
         url = "http://lambda.gsfc.nasa.gov/data/foregrounds/SFD/lambda_sfd_ebv.fits"
         logger.info("Downloading %s..."%url)
@@ -159,9 +164,6 @@ def ebv(ra,dec,ebvmap=None):
     elif utils.isstring(ebvmap):
         logger.info("Loading %s..."%ebvmap)
         ebvmap = healpy.read_map(ebvmap,verbose=False)
-    else:
-        msg = "Unrecognized ebv: %s"%ebvmap
-        raise Exception(msg)
 
     # The SFD map is in Galactic coordinates
     glon,glat = cel2gal(ra,dec)
@@ -175,7 +177,7 @@ def extinction(ebv,band,coeff=None):
     Parameters
     -----------
     ebv  : The dust value E(B-V)
-    band : The DES band (string or array)
+    band : The survey band (string or array)
     coeff: the reddening coefficients (R_b)
 
     Returns
@@ -244,13 +246,13 @@ if __name__ == "__main__":
     ra = data[args.ra]
     dec = data[args.dec]
 
-    logger.info("Calculating E(B-V) from %s."%args.ebv)
+    logger.info("  Calculating E(B-V) from %s."%args.ebv)
     ebvval = ebv(ra,dec,args.ebv)
 
     values = [ebvval]
     dtypes = [('EBV','f4')]
 
-    logger.info("Calculating extinction %s..."%args.ebv)
+    logger.info("  Calculating extinction %s..."%args.ebv)
     for b in args.bands:
         if b in DESDM:
             band = np.repeat(b,len(ra))

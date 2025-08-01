@@ -60,7 +60,7 @@ def wavg_interp_array_y6a2():
                scipy.interpolate.interp1d(x, y_3)]
     return x, f_array
 
-def wavg_extended_class(spread_model,spread_model_error):
+def wavg_extended_class_y6a2(spread_model,spread_model_error):
     """ DES DR2 extended classifier for stars and galaxies using WAVG quantities.
 
         0 : High-confidence stars
@@ -87,6 +87,36 @@ def wavg_extended_class(spread_model,spread_model_error):
     extend_val[(spread_model==1) & (spread_model_error==1)]=-9
     return(extend_val)
 
+
+def wavg_extended_class_delve(spread_model,spread_model_error):
+    """ DELVE DR3 extended classifier for stars and galaxies using WAVG quantities.
+
+        0 : High-confidence stars
+        1 : Likely stars
+        2 : Likely galaxies
+        3 : High-confidence galaxies
+       -9 : Failures
+
+    Parameters
+    ----------
+    spread_model      : SExtractor wavg spread model value in a band
+    spread_model_error: SExtractor wavg spread model error in a band
+    
+    Returns
+    -------
+    extended_class    : Extended classifier output
+    """
+    extend_val  = ((spread_model + 3.0*spread_model_error) > 0.005)*1
+    extend_val += ((spread_model + 1.0*spread_model_error) > 0.003)*1
+    extend_val += ((spread_model - 0.5*spread_model_error) > 0.001)*1
+
+    extend_val[spread_model==-99]=-9
+    extend_val[spreaderr_model==-99]=-9
+    return(extend_val)
+
+wavg_extended_class_y6gold = wavg_extended_class_y6a2
+wavg_extended_class = wavg_extended_class_y6a2
+
 def coadd_interp_array_y6a2():
     x   = [-1.        ,        -0.01,         0,          0.01,         1.0 ]
     y_1 = [3.0 + 0.005, 0.03 + 0.005, 0 + 0.005, -0.03 + 0.005, -3.0 + 0.005]
@@ -98,7 +128,7 @@ def coadd_interp_array_y6a2():
                scipy.interpolate.interp1d(x, y_3)]
     return x, f_array
 
-def coadd_extended_class(spread_model,spread_model_error):
+def coadd_extended_class_y6a2(spread_model,spread_model_error):
     """ DES DR2 extended classifier for stars and galaxies using coadd quantities.
 
         0 : High-confidence stars
@@ -125,9 +155,12 @@ def coadd_extended_class(spread_model,spread_model_error):
     extend_val[(spread_model==1) & (spread_model_error==1)]=-9
     return(extend_val)
 
+coadd_extended_class_y6gold = coadd_extended_class_y6a2
+coadd_extended_class = coadd_extended_class_y6a2
 
 def delve_extended_class(spread_model,spread_model_error):
-    """Extended classifier for stars and galaxies.
+    """Extended classifier for stars and galaxies. Used for DELVE DR1 & DR2
+
         0 : High-confidence stars
         1 : Likely stars
         2 : Likely galaxies
@@ -210,10 +243,9 @@ def bdf_interp_array_y6a2():
 
 
 def bdf_interp_array(data):
-    """                                                                                                                                                           
-    https://cdcvs.fnal.gov/redmine/projects/des-y6/wiki/Y6A2_Extended_Classifier                                                                                  
-                                                                                                                                                                  
-    https://github.com/des-science/science_release/blob/master/object_classification/y6/y6a2_object_classification_fitvd.py                                       
+    """
+    https://cdcvs.fnal.gov/redmine/projects/des-y6/wiki/Y6A2_Extended_Classifier
+    https://github.com/des-science/science_release/blob/master/object_classification/y6/y6a2_object_classification_fitvd.py
     """
     x = [-1.        ,  0.79891862,  0.90845217,  0.98558583,  1.05791208,
          1.13603715,  1.22479487,  1.33572223,  1.48983602,  1.74124395,
@@ -277,37 +309,12 @@ def bdf_extended_class_y6a2(data):
 
 
 def bdf_interp_array_y6gold():
-    f_array = []
-    x = [-3.       ,  0.79891862,  0.90845217,  0.98558583,  1.05791208,
+    """ BDF interpolation array. Includes new high completeness stellar sample.
+    """
+
+    x = [-3.     ,  0.79891862,  0.90845217,  0.98558583,  1.05791208,
          1.13603715,  1.22479487,  1.33572223,  1.48983602,  1.74124395,
-         2.43187589,  6.        ] 
-    y_1 = [0.028, 0.028, 0.008, 0.   , 0.004, 0.012, 0.012, 0.004, 0.012,
-           0.024, 0.04 , 0.04 ]
-    y_2 = [-0.028, -0.028, -0.04 , -0.032, -0.036, -0.032, -0.028, -0.016,
-           -0.012,  0.008,  0.016,  0.016]
-    f_array += [scipy.interpolate.interp1d(x, y_1)]
-    f_array += [scipy.interpolate.interp1d(x, y_2)]
-
-    #x   = [-3.0,      1.3,    1.6,   1.75, 1.917, 2.083, 2.583,  2.75, 6.000]
-    #y_1 = [0.0280,  0.012, 0.0170, 0.0240, 0.028, 0.032, 0.040, 0.040, 0.040]
-    #y_1 = [-0.010, -0.010, 0.0150, 0.0083, 0.010, 0.012, 0.016, 0.016, 0.016]
-    #y_2 = [-0.028, -0.011, -0.003, 0.0083, 0.010, 0.012, 0.016, 0.016, 0.016]
-    #y_3 = [-0.010, -0.010, 0.0083, 0.0083, 0.025, 0.025, 0.058, 0.058, 0.058]
-
-    x   = [-3.0,  0.5,  1.0,   1.5 ,  2.0,  2.5,   3.0, 3.5,   6.0 ]
-    y_1 = [-0.1, -0.1, -0.1,   0.03, 0.06, 0.06,  0.06, 0.06, 0.06 ]
-    y_2 = [-0.1, -0.1, -0.1,  0.007, 0.03, 0.06,  0.28, 0.28, 0.28 ]
-    #y_2 = [ 0.0,  0.0,  0.0,   0.01, 0.04, 0.07, 0.08, 0.08, 0.08 ]
-    y_3 = [ 0.0,  0.0,  0.0,   0.01, 0.06, 0.15, 0.15, 0.15, 0.15 ]
-
-    f_array += [scipy.interpolate.interp1d(x, y_1)]
-        
-    return x, f_array
-
-def bdf_interp_array_y6gold():
-    x = [-3.       ,  0.79891862,  0.90845217,  0.98558583,  1.05791208,
-         1.13603715,  1.22479487,  1.33572223,  1.48983602,  1.74124395,
-         2.43187589,  6.        ] 
+         2.43187589,  6.     ] 
     y_1 = [0.028, 0.028, 0.008, 0.   , 0.004, 0.012, 0.012, 0.004, 0.012,
            0.024, 0.04 , 0.04 ]
     #y_2 = [-0.028, -0.028, -0.04 , -0.032, -0.036, -0.032, -0.028, -0.016,
@@ -331,11 +338,21 @@ def bdf_extended_class_y6gold(data):
     Newer version of the bdf classifier (with high-purity galaxy sample).
 
     https://github.com/des-science/science_release/blob/master/object_classification/y6/y6a2_object_classification_fitvd.py
+
+        0 : High-confidence stars
+        1 : Likely stars
+        2 : Likely galaxies
+        3 : High-confidence galaxies
+        4 : High-purity galaxies
+       -9 : Failures
+
     """
     x, f_array = bdf_interp_array_y6gold()
 
-    s2n_var = 'bdf_s2n' if 'bdf_s2n' in data.dtype.names else 'BDF_S2N'
-    t_var = 'bdf_T' if 'bdf_T' in data.dtype.names else 'BDF_T'
+    data = pd.DataFrame(data)
+
+    s2n_var = 'bdf_s2n' if 'bdf_s2n' in data.columns else 'BDF_S2N'
+    t_var = 'bdf_T' if 'bdf_T' in data.columns else 'BDF_T'
 
     x_data = np.log10(data[s2n_var])
     x_data = np.where(np.isfinite(x_data), x_data, x[0])
@@ -349,11 +366,54 @@ def bdf_extended_class_y6gold(data):
     # Sentinel values
     selection  = np.isclose(data[t_var], -9.999e+09) 
     selection |= np.isclose(data[s2n_var], -9.999e+09) 
-    selection |= (data[s2n_var] <= 0.)
+    selection |= (data[s2n_var] <= 0.0)
+    selection |= (x_data > x[-1])
     ext[selection] = -9
 
     return np.where(np.isfinite(ext), ext, -9)
 
+
+def bdf_extended_class_dr3gold(data): 
+    """
+    Star/galaxy classification criteria for DELVE DR3 based on DES Y6 Gold. More robust to spurious measurements.
+
+        0 : High-confidence stars
+        1 : Likely stars
+        2 : Likely galaxies
+        3 : High-confidence galaxies
+        4 : High-purity galaxies
+       -9 : Failures
+
+    """
+    # Use the gold interpolations
+    x, f_array = bdf_interp_array_y6gold()
+
+    data = pd.DataFrame(data)
+    s2n_var = 'bdf_s2n' if 'bdf_s2n' in data.columns else 'BDF_S2N'
+    t_var = 'bdf_T' if 'bdf_T' in data.columns else 'BDF_T'
+
+    x_data = np.log10(data[s2n_var])
+    y_data = data[t_var]
+
+    # Sentinel values for spurious measurements
+    sentinel  = np.isclose(data[t_var], -9.999e+09) 
+    sentinel |= np.isclose(data[s2n_var], -9.999e+09) 
+    sentinel |= (data[s2n_var] <= 0.0)
+    sentinel |= (x_data < x[0]) | (x_data > x[-1])
+    sentinel |= ~np.isfinite(x_data)
+    
+    # Restrict values to interpolation range (output sentinel)
+    x_data = np.clip(x_data, x[0], x[-1])
+    x_data[np.isnan(x_data)] = x[0]
+
+    ext = np.tile(0, len(x_data))
+    for f in f_array:
+        selection = (y_data > f(x_data))
+        ext += selection.astype(int)
+    
+    ext[sentinel] = -9
+
+    return np.where(np.isfinite(ext), ext, -9)
 
 bdf_extended_class = bdf_extended_class_y6a2
 
@@ -375,54 +435,18 @@ def bdf_concentration_class(data):
     return ~sel_stars
 
 
-def wavg_extended_class(spread_model,spread_model_error):
-    """ DES DR2 extended classifier for stars and galaxies using WAVG quantities.
 
-        0 : High-confidence stars
-        1 : Likely stars
-        2 : Likely galaxies
-        3 : High-confidence galaxies
-       -9 : Failures
+def y6gold_ext_mash(ext_fitvd, ext_wavg, ext_coadd):
+    """ Create MASH of fitvd, wavg, and coadd classifiers """
+    ext_mash = -9*np.ones(len(ext_fitvd),dtype=int)
+    sel_coadd = ext_coadd > -9
+    ext_mash[sel_coadd] = ext_coadd[sel_coadd]
+    sel_wavg = ext_wavg > -9
+    ext_mash[sel_wavg] = ext_wavg[sel_wavg]
+    sel_fitvd = ext_fitvd > -9
+    ext_mash[sel_fitvd] = ext_fitvd[sel_fitvd]
+    return ext_mash
 
-    Parameters
-    ----------
-    spread_model      : SExtractor spread model value in a band
-    spread_model_error: SExtractor spread model error in a band
-    
-    Returns
-    -------
-    extended_class    : Extended classifier output
-    """
-    extend_val  = ((spread_model + 3.0*spread_model_error) > 0.005)*1
-    extend_val += ((spread_model + 1.0*spread_model_error) > 0.003)*1
-    extend_val += ((spread_model - 0.5*spread_model_error) > 0.001)*1
-
-    extend_val[spread_model==-1]=-9
-    extend_val[(spread_model==0) & (spread_model_error==0)]=-9
-    extend_val[(spread_model==1) & (spread_model_error==1)]=-9
-    return(extend_val)
-
-def create_feature_matrix(datasets, names=None):
-    PARAMS = ['SPREAD_MODEL_I','SPREADERR_MODEL_I', 
-              'WAVG_SPREAD_MODEL_I', 'WAVG_SPREADERR_MODEL_I', 
-              'BDF_T', 'BDF_S2N']
-    if names is None: names = PARAMS
-
-    X = np.zeros((0,len(names)),dtype=float)
-
-    datasets = np.atleast_1d(datasets)
-    for data in datasets:
-        #data   = dataset['data']
-        #data   = recfn.rec_append_fields(data,['LOG_BDF_S2N'],[np.log10(data['BDF_S2N'])])
-        #data   = recfn.rec_append_fields(data,['CONCENTRATION_I'],
-        #                                 [data['PSF_MAG_APER_8_I'] - data['BDF_MAG_I']])
-     
-        x = np.zeros((len(data),len(names)),dtype=float)
-        for i,n in enumerate(names):
-            x[:,i] = data[n]
-        X = np.concatenate([X, x])
-
-    return X
 
 def create_feature_matrix(data, names=None):
     PARAMS = ['SPREAD_MODEL_I','SPREADERR_MODEL_I', 
@@ -447,11 +471,36 @@ def combo_random_forest_y6gold(filename,data):
     X = create_feature_matrix(data,names=pipe[-1].feature_names_)
     return pipe.predict_proba(X)[:,1]
 
-def y6gold_xgboost(filename,data):
+def y6gold_sklearn(filename,data):
     import joblib
     pipe = joblib.load(filename)
     X = create_feature_matrix(data,names=pipe[-1].feature_names_)
     return pipe.predict_proba(X)[:,1]
 
+def xgb_extended_class_y6gold(xgb_pred): 
+    """ XGBoost extended classification.
 
+        0 : High-confidence stars
+        1 : Likely stars
+        2 : Likely galaxies
+        3 : High-confidence galaxies
+        4 : Ultra-pure galaxies
+       -9 : Failures
+    
+    Parameters
+    ----------
+    xgb_pred : XGBoost classifier prediction pseudo-probability
 
+    Returns
+    -------
+    eclass : Extended classification
+    """
+    #eclass_cuts = [0.8, 0.5, 0.1, 0.05]
+    eclass_cuts = [0.865, 0.11, 0.045, 0.015]
+    eclass = np.zeros(len(xgb_pred), dtype=int)
+
+    for cut in eclass_cuts:
+        eclass += xgb_pred < cut
+    
+    eclass[xgb_pred < 0] = -9
+    return eclass

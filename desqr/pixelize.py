@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""Shard input catalog files into healpix files."""
 import os,shutil
 import glob
 
@@ -99,8 +100,8 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
     #    print("Removing existing files...")
     #    map(os.remove,outfiles)
 
-    for ii,infile in enumerate(infiles):
-        logger.info('(%i/%i) %s'%(ii+1, len(infiles), infile))
+    for i,infile in enumerate(infiles):
+        logger.info('(%i/%i) %s'%(i+1, len(infiles), infile))
         data = readfile(infile,float32)
         if data is None: continue
 
@@ -111,7 +112,7 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
         #data = recfuncs.rec_append_fields(data,name,object_pix,dtype)
 
         for pix in np.unique(catalog_pix):
-            logger.debug("Processing pixel %s"%pix)
+            logger.debug("Processing pixel: %s"%pix)
 
             force_band = True
             if ('BAND' in data.dtype.names) and (not force_band):
@@ -136,6 +137,7 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
                 out[1].write_key('HPX',pix,comment='HEALPix pixel (RING)')
                 out[1].write_key('BAND',band,comment='Photometric band')
             else:
+                logger.debug("Appending to %s"%outfile)
                 out=fitsio.FITS(outfile,mode='rw')
                 out[1].append(arr)
 
@@ -144,9 +146,9 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
 
 if __name__ == "__main__":
     import argparse
-    description = "python script"
+    description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('input',help='input directory or file')
+    parser.add_argument('input',help='input directory or file list')
     parser.add_argument('outdir',help='output directory')
     parser.add_argument('--ra-dec',nargs=2,
                         help='names of input RA,DEC columns (case insensitive)')
@@ -159,7 +161,7 @@ if __name__ == "__main__":
     parser.add_argument('--float32',action='store_true',
                         help='convert columns to float32 (excludes RA,DEC)')
     parser.add_argument('-f','--force',action='store_true',
-                        help='overwrite existing files')
+                        help='append to existing files')
     parser.add_argument('-v','--verbose',action='store_true',
                         help='output verbosity')
     args = parser.parse_args()
@@ -170,7 +172,7 @@ if __name__ == "__main__":
 
     if os.path.isfile(args.input): 
         if args.input.endswith(('.txt','.dat')):
-            infiles = np.loadtxt(args.input,dtype=str)
+            infiles = np.atleast_1d(np.loadtxt(args.input,dtype=str))
         else: 
             msg = "Unrecognized input: %s"%args.input
             raise IOError(msg)

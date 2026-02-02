@@ -18,7 +18,8 @@ if __name__ == "__main__":
     parser = Parser(description=__doc__)
     args = parser.parse_args()
 
-    config  = yaml.safe_load(open(args.config))
+    #config  = yaml.safe_load(open(args.config))
+    config  = args.config
     hpxdir  = config['hpxdir']
     zpfile  = config['zpfile']
     blfile  = config['blfile']
@@ -34,6 +35,8 @@ if __name__ == "__main__":
     #download.download(zpfile,query,sqlfile=sqlfile,section=config['db'],force=args.force)
 
     for band in config['bands']:
+        if args.bands and (band not in args.bands): continue
+
         dirname = os.path.join(hpxdir,band)
         logdir = mkdir(os.path.join(dirname,'log'))
 
@@ -44,7 +47,9 @@ if __name__ == "__main__":
             pathname = os.path.join(dirname,config['hpxbase'].format(band=band))
             filenames = [pathname%p for p in args.pix]
             
-        for filename in filenames:
+        for i,filename in enumerate(filenames):
+            print("(%s/%s): %s"%(i+1,len(filenames), filename))
+
             if not os.path.exists(filename):
                 print("WARNING: File does not exist; skipping %s..."%filename)
                 continue
@@ -85,7 +90,8 @@ if __name__ == "__main__":
 
             if args.verbose: print(submit)
                 
-            subprocess.call(submit,shell=True)
-            time.sleep(args.sleep)
+            if not args.dryrun: subprocess.call(submit,shell=True)
+            if args.queue != 'local': time.sleep(args.sleep)
+
         if args.queue != 'local': time.sleep(5)
             

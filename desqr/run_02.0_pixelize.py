@@ -8,6 +8,7 @@ import glob
 import subprocess
 from collections import OrderedDict as odict
 from functools import partial
+import warnings
 
 import yaml
 import numpy as np
@@ -19,8 +20,10 @@ def make_paths(config, bands=None):
     explist = config['explist']
     rawdir = config['rawdir']
     basename = config.get('rawbase')
-    exposures = pd.read_csv(explist).to_records(index=False)
 
+    exposures = pd.read_csv(explist).fillna('').to_records(index=False)
+    exposures = exposures[exposures['path'] != '']
+    
     if not bands: bands = config['bands']
     bands = list(bands)
 
@@ -57,6 +60,8 @@ if __name__ == "__main__":
     hpxdir = config['hpxdir']
 
     for band in config['bands']:
+        if args.bands and (band not in args.bands): continue
+            
         outdir = mkdir(os.path.join(hpxdir,band))
         logdir = mkdir(os.path.join(outdir,'log'))
         logfile = os.path.join(logdir,'pixelize_%s.log'%band)
@@ -65,7 +70,7 @@ if __name__ == "__main__":
         # Create a txt file of file paths
         paths = make_paths(config,bands=band)[band]
         pathfile = os.path.join(hpxdir,'filepaths_%s.txt'%band)
-        print("Writing %s..."%pathfile)
+        print("Writing %s filepaths to %s..."%(len(paths), pathfile))
         np.savetxt(pathfile,paths,fmt='%s')
 
         cmd = 'pixelize.py %s %s -o %s -n %i'%(pathfile,outdir,outbase,config['nside'])

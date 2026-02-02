@@ -19,9 +19,8 @@ if __name__ == "__main__":
     from parser import Parser
     parser = Parser(description=__doc__)
     parser.set_defaults(njobs=12) 
-    parser.add_argument('-m','--mlimit',default=40,type=float,
+    parser.add_argument('-m','--mlimit',default=40,type=int,
                         help='memory limit (GB)')
-    parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
     config = yaml.safe_load(open(args.config))
@@ -35,6 +34,8 @@ if __name__ == "__main__":
     else: pixels = np.arange(hp.nside2npix(config['nside']))
         
     for pix in pixels:
+        print("(%s/%s): %s"%(i+1,len(pixels), pix))
+
         infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         if len(infiles) == 0: continue
 

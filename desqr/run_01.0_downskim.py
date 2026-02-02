@@ -20,11 +20,11 @@ if __name__ == "__main__":
     rawdir = config['rawdir']
     explist = config['explist']
     tags = config.get('tags')
-    section = config.get('db','bliss')
     basename = config.get('rawbase','D{expnum:08d}_{band:s}_cat.fits')
     procbase = 'D{expnum:08d}_{band}_25_r1p1_immask.fits.fz'
 
     # Creating exposure list done separately
+    #section = config.get('db','bliss')
     #if not is_found(explist,args.force):
     #    print("Didn't find %s; downloading..."%explist)
     #    query = download.exposure_query(tags)
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     #    sqlfile = os.path.splitext(explist)[0]+'.sql'
     #    download.download(explist,query,sqlfile=sqlfile,section=section,force=args.force)
     
-    exposures = np.recfromcsv(explist)
+    exposures = pd.read_csv(explist).to_records(index=False)
     for band in config['bands']:
         outdir = mkdir(os.path.join(rawdir,band))
         logdir = mkdir(os.path.join(outdir,'log'))

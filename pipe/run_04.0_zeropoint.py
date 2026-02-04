@@ -10,7 +10,6 @@ import glob
 
 import fitsio
 
-import download
 from utils import isstring, mkdir
 
 if __name__ == "__main__":
@@ -18,7 +17,6 @@ if __name__ == "__main__":
     parser = Parser(description=__doc__)
     args = parser.parse_args()
 
-    #config  = yaml.safe_load(open(args.config))
     config  = args.config
     hpxdir  = config['hpxdir']
     zpfile  = config['zpfile']
@@ -29,6 +27,7 @@ if __name__ == "__main__":
         msg = "Couldn't find ZP file: %s"%zpfile
         raise Exception(msg)
 
+    #import download
     #query = download.zeropoint_query(config['tags'])
     #print(query)
     #sqlfile = os.path.splitext(zpfile)[0]+'.sql'

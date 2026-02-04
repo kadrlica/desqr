@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument('--nproc', default=1, type=int,
                         help='number processes per job')
     parser.add_argument('--nside', default=None, type=int)
-    parser.add_argument('--mag', action='store_true')
+    #parser.add_argument('--mag', action='store_true')
     parser.add_argument('-r', '--run', action='append', choices=SECTIONS)
     args = parser.parse_args()
 
@@ -34,9 +34,9 @@ if __name__ == "__main__":
         else:          bands = config['bands'] + [all_bands]
 
         cmd = '%s %s -p -n %i'%(exe,args.configfile,nside)
+        cmd += ' --mag' # always apply magnitude selection
         cmd += ' --nproc %s'%args.nproc # number of parallel processes
         cmd += ' -v' if args.verbose else ''
-        cmd += ' --mag' if args.mag else ''  # magnitude selection
         cmd += ' '+' '.join(['-b '+b for b in bands])
 
         logfile = os.path.join(logdir,'footprint.log')
@@ -55,10 +55,10 @@ if __name__ == "__main__":
 
         for cls in ['star','gal']:
             cmd = '%s %s -p -n %i'%(exe,args.configfile,nside)
+            cmd += ' --mag' # always apply magnitude selection
             cmd += ' -e %s'%cls 
             cmd += ' --nproc %s'%args.nproc # number of parallel processes
             cmd += ' -v' if args.verbose else ''
-            cmd += ' --mag' if args.mag else ''  # magnitude selection
             cmd += ' '+' '.join(['-b '+b for b in bands])
 
             logfile = os.path.join(logdir,'footprint_%s.log'%cls)
@@ -77,10 +77,11 @@ if __name__ == "__main__":
 
         for cls in ['star']:
             cmd = '%s %s -p -n %i'%(exe,args.configfile,nside)
+            cmd += ' --color'
+            #cmd += ' --mag' if args.mag else ''  # magnitude selection applied by color
             cmd += ' -e %s'%cls
             cmd += ' --nproc %s'%args.nproc # number of parallel processes
             cmd += ' -v' if args.verbose else ''
-            cmd += ' --mag' if args.mag else ''  # magnitude selection
             cmd += ' '+' '.join(['-b '+b for b in bands])
 
             logfile = os.path.join(logdir,'color_%s.log'%cls)
@@ -120,8 +121,8 @@ if __name__ == "__main__":
         types = [
             #['hpx_rms'  , ['g','r','i','z']],
             #['gaia_dr2' , ['r']],
-            ['gaia_edr3', ['r']],
-            #['gaia_dr3', ['r']],
+            #['gaia_edr3', ['r']],
+            ['gaia_dr3', ['r']],
         ]
 
         for t,bands in types:
@@ -150,13 +151,15 @@ if __name__ == "__main__":
             #['hpx_rms'  , ['g','r','i','z']],
             #['des_dr2'  , ['g','r','i','z']],
             #['gaia_dr2' , ['griz']],
-            ['gaia_edr3', ['griz']],
-            #['gaia_dr3', ['griz']],
+            #['gaia_edr3', ['griz']],
+            ['gaia_dr3', ['griz']],
         ]
 
         for t,bands in types:
             if args.bands: bands = args.bands
-            if t.startswith('gaia'): bands = ['griz']
+            if t.startswith('gaia'):
+                bands = ['griz']
+                print("Gaia photometry uses all bands: %s"%bands)
             for b in bands:
                 cmd = '%s %s -b %s --type %s'%(exe,args.configfile,b,t)
                 cmd += ' --nproc %s'%args.nproc # number of parallel processes
@@ -166,8 +169,3 @@ if __name__ == "__main__":
                 submit = 'csub -q %s -n %s -o %s %s'%(args.queue,args.njobs,logfile,cmd)
                 if args.verbose: print(submit)
                 subprocess.call(submit,shell=True)
-                    
-                # Gaia uses all bands at once
-                if t.startswith('gaia'): 
-                    print("Gaia photometry uses all bands 'griz'.")
-                    break

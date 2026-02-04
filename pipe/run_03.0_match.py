@@ -23,7 +23,7 @@ if __name__ == "__main__":
                         help='memory limit (GB)')
     args = parser.parse_args()
 
-    config = yaml.safe_load(open(args.config))
+    config = args.config
     hpxdir = config['hpxdir']
     logdir = mkdir(os.path.join(hpxdir,'log'))
     radius = config['radius']
@@ -32,12 +32,13 @@ if __name__ == "__main__":
 
     if args.pix: pixels = args.pix
     else: pixels = np.arange(hp.nside2npix(config['nside']))
-        
-    for pix in pixels:
-        print("(%s/%s): %s"%(i+1,len(pixels), pix))
 
+    print("Starting matching...")
+    
+    for i,pix in enumerate(pixels):
         infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         if len(infiles) == 0: continue
+        print("(%s/%s): hpx %05d"%(i+1,len(pixels), pix))
 
         done = (not args.force)
         for f in infiles:

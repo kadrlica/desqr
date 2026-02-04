@@ -55,7 +55,7 @@ if __name__ == "__main__":
     parser.set_defaults(njobs=None)
     args = parser.parse_args()
 
-    config = yaml.safe_load(open(args.config))
+    config = args.config
     rawdir = config['rawdir']
     hpxdir = config['hpxdir']
 

@@ -17,6 +17,8 @@ if __name__ == "__main__":
     from parser import Parser
     parser = Parser()
     args = parser.parse_args()
+
+    print("Running catalog creation...")
     
     config = args.config
     hpxdir = config['hpxdir']
@@ -28,7 +30,6 @@ if __name__ == "__main__":
     else: pixels = np.arange(hp.nside2npix(config['nside']))
 
     for i,pix in enumerate(pixels):
-        print("(%s/%s): %s"%(i+1,len(pixels), pix))
               
         infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         catfile = os.path.join(catdir,config['catbase']%pix)
@@ -37,6 +38,7 @@ if __name__ == "__main__":
 
         if len(infiles) == 0: continue
         if is_found(catfile,args.force): continue
+        print("(%s/%s): %s"%(i+1,len(pixels), pix))
 
         minbands = config.get('minbands')
         minbands = '--min-bands %s'%minbands if minbands else ''

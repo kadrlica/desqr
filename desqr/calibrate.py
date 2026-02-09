@@ -469,7 +469,7 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     logging.info("Sigma-clipping...")
     nsig = 3.0
     for niter in range(3):
-        logging.info("   iteration: %d...""" %niter)
+        logging.info("   iteration: %d..." %niter)
 
         # make a copy of original df, and then delete the old one...
         newdf = df[mask].copy()

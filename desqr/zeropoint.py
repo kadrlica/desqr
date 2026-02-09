@@ -14,12 +14,12 @@ np.seterr(divide='ignore')
 import pandas as pd
 import fitsio
 
-from ugali.utils.logger import logger
-import utils
-from const import BADMAG,BADZP
+form desqr import utils
+from desqr.logger import logger
+from desqr.const import BADMAG,BADZP
 
 DATACOLS = ['EXPNUM','CCDNUM','FLUX_PSF','FLUXERR_PSF','FLUX_AUTO','FLUXERR_AUTO']
-ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
+ZPCOLS   = ['EXPNUM','CCDNUM','MAG_ZERO','SIGMA_MAG_ZERO','FLAG']
 OUTCOLS  = ['MAG_PSF','MAGERR_PSF','MAG_AUTO','MAGERR_AUTO','MAG_ZERO','SIGMA_MAG_ZERO','ZP_FLAG']
 
 def calc_mag(flux,zeropoint):
@@ -80,6 +80,13 @@ def read_zeropoint(zeropoint,blacklist=None):
         msg = "Unrecognized zeropoint: %s"%ext
         raise Exception(msg)
 
+    # Rename FLAG to ZP_FLAG
+    if 'FLAG' in zp.dtype.names:
+        msg = "Renaming FLAG to ZP_FLAG..."
+        logger.info(msg)
+        names = ['ZP_FLAG' if n=='FLAG' else n for n in zp.dtype.names]
+        zp.dtype.names = names
+
     # Everything assumes zeropoints are positive
     # If necessary, change the sign of MAG_ZERO
     if (zp['MAG_ZERO'] < 0).sum()/float(len(zp)) > 0.90:
@@ -105,7 +112,7 @@ def read_zeropoint(zeropoint,blacklist=None):
     if blacklist is None:
         return zp
     else:
-        logging.info("Excluding CCDs from %s..."%blacklist)
+        logger.info("Excluding CCDs from %s..."%blacklist)
         bl = read_blacklist(blacklist)
         # Unique value from EXPNUM, CCDNUM
         zpval = utils.uid(zp['EXPNUM'],zp['CCDNUM'])
@@ -176,8 +183,7 @@ if __name__ == "__main__":
     parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()
 
-    level = logging.DEBUG if args.verbose else logging.INFO
-    logging.getLogger().setLevel(level)
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
     logger.info("Reading %s..."%args.infile)
     data = fitsio.read(args.infile,ext=1,columns=DATACOLS)

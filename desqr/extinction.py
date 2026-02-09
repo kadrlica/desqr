@@ -10,24 +10,18 @@ import shutil
 from collections import OrderedDict as odict
 import tempfile
 import subprocess
-import logging
 
 import pandas as pd
 import numpy as np
 import fitsio
-import healpy
 import healpy as hp
 
 # These are some packages that are hanging around
 import ugali.utils.healpix as healpix
 from ugali.utils.projector import cel2gal
-from ugali.utils.logger import logger
 
-try:
-    import desqr.utils as utils
-except ModuleNotFoundError:
-    import utils
-
+from desqr import utils
+from desqr.logger import logger
 
 BANDS = ['g','r','i','z','Y','y']
 
@@ -159,11 +153,11 @@ def ebv(ra,dec,ebvmap=None):
         filename = tempfile.NamedTemporaryFile().name
         cmd = "wget %s -O %s"%(url,filename)
         subprocess.call(cmd,shell=True)
-        ebvmap = healpy.read_map(filename,verbose=False)
+        ebvmap = hp.read_map(filename)
         os.remove(filename)
     elif utils.isstring(ebvmap):
         logger.info("Loading %s..."%ebvmap)
-        ebvmap = healpy.read_map(ebvmap,verbose=False)
+        ebvmap = hp.read_map(ebvmap)
 
     # The SFD map is in Galactic coordinates
     glon,glat = cel2gal(ra,dec)
@@ -217,8 +211,7 @@ if __name__ == "__main__":
                         help='output verbosity')
     args = parser.parse_args()
 
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
     if args.coeff == 'Y3A1':
         COEFF = Y3A1

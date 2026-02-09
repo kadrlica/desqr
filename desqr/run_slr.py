@@ -1,17 +1,22 @@
-import numpy as np
-import scipy.stats as scipyStats
-import fitsio
-import healpy as hp
+"""
+Run stellar locus regression validation.
+"""
 import glob
 import datetime
-import logging
-logger = logging.getLogger()
-from utils import load_infiles
-from scipy.stats import median_absolute_deviation
+
 import warnings
 warnings.filterwarnings("ignore")
 
-from alex_star import bdf_extended_class, ebv, extinction
+import numpy as np
+import scipy.stats as scipyStats
+from scipy.stats import median_absolute_deviation
+import fitsio
+import healpy as hp
+
+from desqr.utils import load_infiles
+from desqr.classify import bdf_extended_class
+from desqr.extinction import ebv, extinction
+from desqr.logger import logger
 
 # Everything below this is copied directly from pipe_analysis/utils.py.
 # Should we move all those functions here once pipe_analysis is rewritten?

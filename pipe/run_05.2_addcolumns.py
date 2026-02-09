@@ -42,7 +42,7 @@ if __name__ == "__main__":
             print("Adding %(outcol)s..."%params)
 
             # The nested use of single and double quotes is really
-            # nasty with csub from the shell, and is (nearly?) to
+            # nasty with csub from the shell, and is (nearly?)
             # impossible from a python call to subprocess
             cmd = """add_column.py %(force)s --column %(outcol)s --formula "data['%(column)s_%(band)s']-data['EXTINCTION_%(band)s']" %(infiles)s | tee %(logfile)s"""%params
             #print(cmd)

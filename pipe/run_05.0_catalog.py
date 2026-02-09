@@ -10,17 +10,17 @@ import glob
 
 import numpy as np
 import healpy as hp
-from ugali.utils.shell import mkdir
-from utils import is_found
+
+from utils import is_found, mkdir
 
 if __name__ == "__main__":
     from parser import Parser
     parser = Parser()
     args = parser.parse_args()
-    
-    force = '-f' if args.force else ''
 
-    config = yaml.safe_load(open(args.config))
+    print("Running catalog creation...")
+    
+    config = args.config
     hpxdir = config['hpxdir']
     catdir = mkdir(config['catdir'])
     keydir = mkdir(config['keydir'])
@@ -29,7 +29,8 @@ if __name__ == "__main__":
     if args.pix: pixels = args.pix
     else: pixels = np.arange(hp.nside2npix(config['nside']))
 
-    for pix in pixels:
+    for i,pix in enumerate(pixels):
+              
         infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         catfile = os.path.join(catdir,config['catbase']%pix)
         keyfile = os.path.join(keydir,config['keybase']%pix)
@@ -37,13 +38,15 @@ if __name__ == "__main__":
 
         if len(infiles) == 0: continue
         if is_found(catfile,args.force): continue
+        print("(%s/%s): %s"%(i+1,len(pixels), pix))
 
         minbands = config.get('minbands')
         minbands = '--min-bands %s'%minbands if minbands else ''
 
-        ebv      = config.get('ebv',None)
-        ebv      = '--ebv %s'%ebv if ebv else ''
+        ebv = config.get('ebv',None)
+        ebv = '--ebv %s'%ebv if ebv else ''
 
+        force = '-f' if args.force else ''
         bands = ' '.join(['-b %s'%b for b in config.get('bands',[])])
         params=(' '.join(infiles),catfile,keyfile,bands,minbands,ebv,force)
         cmd = 'catalog.py -v %s -o %s -k %s %s %s %s %s'%params

@@ -19,12 +19,11 @@ if __name__ == "__main__":
     from parser import Parser
     parser = Parser(description=__doc__)
     parser.set_defaults(njobs=12) 
-    parser.add_argument('-m','--mlimit',default=40,type=float,
+    parser.add_argument('-m','--mlimit',default=40,type=int,
                         help='memory limit (GB)')
-    parser.add_argument('-p','--pix',action='append',type=int)
     args = parser.parse_args()
 
-    config = yaml.safe_load(open(args.config))
+    config = args.config
     hpxdir = config['hpxdir']
     logdir = mkdir(os.path.join(hpxdir,'log'))
     radius = config['radius']
@@ -33,10 +32,13 @@ if __name__ == "__main__":
 
     if args.pix: pixels = args.pix
     else: pixels = np.arange(hp.nside2npix(config['nside']))
-        
-    for pix in pixels:
+
+    print("Starting matching...")
+    
+    for i,pix in enumerate(pixels):
         infiles = glob.glob(hpxdir+'/*/*%05d.fits'%pix)
         if len(infiles) == 0: continue
+        print("(%s/%s): hpx %05d"%(i+1,len(pixels), pix))
 
         done = (not args.force)
         for f in infiles:

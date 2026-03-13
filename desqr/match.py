@@ -3,14 +3,14 @@
 Spatial matching algorithms.
 """
 import os, sys
+from collections import OrderedDict as odict
+import gc
+
 import fitsio
 import numpy as np
 import pandas as pd
-from collections import OrderedDict as odict
-import logging
-import gc
-
 import healpy as hp
+import scipy
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
 
@@ -19,18 +19,14 @@ try:
 except ImportError:
     from ugali.utils.mlab import rec_append_fields
 
-from ugali.utils.logger import logger
 from ugali.utils.projector import angsep
+from ugali.utils.healpix import ang2vec
 
-
-try:
-    from desqr.utils import set_memory_limit, insert_columns
-    from desqr.const import ZEROSTR,OBJECT_ID
-    from desqr.split import split_qcat
-except ModuleNotFoundError:
-    from .utils import set_memory_limit, insert_columns
-    from .const import ZEROSTR,OBJECT_ID
-    from .split import split_qcat
+from desqr.utils import set_memory_limit, insert_columns
+#from desqr.utils import angsep, ang2vec
+from desqr.const import ZEROSTR,OBJECT_ID
+from desqr.split import split_qcat
+from desqr.logger import logger
 
 MATCHCOLS = ['RA','DEC','EXPNUM']
 
@@ -47,28 +43,6 @@ MATCHCOLS = ['RA','DEC','EXPNUM']
 ###     coords[:, 1] = y
 ###     coords[:, 2] = z
 ###     return coords
-
-
-def ang2vec(lon, lat):
-    """Convert longitude and latitude into array of unit vectors.
-
-    Parameters
-    ----------
-    lon : longitude (deg)
-    lat : latitude (deg)
-
-    Returns
-    -------
-    vec : 2D array of vectors
-    """
-    lonr = np.deg2rad(lon)
-    latr = np.deg2rad(lat)
-    coslat = np.cos(latr)
-    return np.stack([
-        np.atleast_1d(np.cos(lonr) * coslat),
-        np.atleast_1d(np.sin(lonr) * coslat),
-        np.atleast_1d(np.sin(latr)),
-    ], axis=-1)
 
 def projector(lon, lat):
     return ang2vec(lon,lat)
@@ -189,7 +163,11 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
  
     tree = cKDTree(coords2)
     idx1 = np.arange(lon1.size) 
-    idx2 = tree.query(coords1,eps=eps,n_jobs=n_jobs)[1]
+
+    if tuple(int(x) for x in scipy.__version__.split('.')[:2]) >= (1, 4):
+        idx2 = tree.query(coords1, eps=eps, workers=n_jobs)[1]
+    else:
+        idx2 = tree.query(coords1, eps=eps, n_jobs=n_jobs)[1]
 
     ds = angsep(lon1, lat1, lon2[idx2], lat2[idx2])
     return np.atleast_1d(idx1), np.atleast_1d(idx2), np.atleast_1d(ds)
@@ -430,7 +408,7 @@ if __name__ == "__main__":
                         help='output verbosity')
     args = parser.parse_args()
     
-    if args.verbose: logger.setLevel(logging.DEBUG)
+    if args.verbose: logger.setLevel(logger.DEBUG)
     
     if args.mlimit: 
         logger.info("Setting memory limit: %.1fGB"%(args.mlimit))

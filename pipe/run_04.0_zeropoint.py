@@ -10,10 +10,10 @@ import glob
 
 import fitsio
 
-from utils import isstring, mkdir
+from desqr.utils import isstring, mkdir
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     args = parser.parse_args()
 

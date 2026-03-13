@@ -9,8 +9,9 @@ import pandas as pd
 import fitsio
 import healpy as hp
 
-from ugali.utils.logger import logger
-from ugali.utils.shell import mkdir
+from astropy.table import QTable
+from desqr.logger import logger
+from desqr.utils import mkdir
 
 HPXBASE = 'hpx_%05d.fits'
 
@@ -25,6 +26,20 @@ ALT_RADEC_COLUMNS = [
 OBJ = '|O'
 STR = '|S30'
 
+def read_fits(filename):
+    """ Read a FITS file and access data """
+    f = fitsio.FITS(filename,'r',upper=True)
+    idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
+    nrows = f[idx].get_nrows()
+    logger.info("%i objects found"%nrows)
+    if not nrows: 
+        f.close()
+        return
+     
+    data = f[idx].read()
+    f.close()
+    return data
+    
 def read_csv_float32(filename):
     """
     Read a csv file at 32bit precision (excluding ra/dec columns
@@ -41,34 +56,59 @@ def read_csv_float32(filename):
 
     return pd.read_csv(filename,encoding='ascii',engine='c',dtype=float32_cols).to_records(index=False)
 
-def readfile(filename,float32=False):
+def read_csv(filename, float32=False):
+    if float32:
+        data = read_csv_float32(filename)
+    else:
+        data = pd.read_csv(filename,encoding='ascii').to_records(index=False)
+    dtype = [(str(n).upper(),d if d!=OBJ else STR) for n,d in data.dtype.descr]
+    data = data.astype(dtype) # not efficient...see float32 idea above
+    return data
+
+def read_ecsv(filename):
+    """ Read an ecsv file using astropy. Convert to a numpy.recarry for consistency. 
+    https://docs.astropy.org/en/latest/io/ascii/read.html#reading-gaia-data-tables
+    """
+    # Read the ecsv file
+    tab = QTable.read(filename, format='ascii.ecsv', fill_values=("null", "0"))
+    # upper case columns
+    names = tab.colnames
+    tab.rename_columns(names, list(map(str.upper, names)))
+    # Return just the data of the masked array
+    data = tab.as_array().data
+    # Convert the DESIGNATION string
+    dtype = [(str(n).upper(), d if n != 'DESIGNATION' else '|S30') for n,d in data.dtype.descr]
+    return data.astype(dtype)
+
+def read_file(filename, filetype=None,  float32=False):
     """
     Abstract file reading to deal with raw catalog files.
+
+    Parameters
+    ----------
+    filename : input file name.
+    filetype : input file type (guess if None)
+    float32  : read csv file into float32
+    
+    Returns
+    -------
+    data : numpy.recarray of the data
     """
-    base,ext = os.path.splitext(filename)
-    if np.char.endswith(filename,['.fits','.fits.gz','.fz']).sum():
-        f = fitsio.FITS(filename,'r',upper=True)
-        idx = 'LDAC_OBJECTS' if 'LDAC_OBJECTS' in f else 1
-        nrows = f[idx].get_nrows()
-        logger.info("%i objects found"%nrows)
-        if not nrows: 
-            f.close()
-            return
-         
-        data = f[idx].read()
-        f.close()
-    elif np.char.endswith(filename, ['.csv','.csv.gz']).sum():
-        # This is not perfect, but hey, it works...
-        if float32:
-            data = read_csv_float32(filename)
-        else:
-            data = pd.read_csv(filename,encoding='ascii').to_records(index=False)
-        dtype = [(str(n).upper(),d if d!=OBJ else STR) for n,d in data.dtype.descr]
-        data = data.astype(dtype) # not efficient...see float32 idea above
-        nrows = len(data)
-        logger.info("%i objects found"%nrows)
-        if not nrows: 
-            return
+    
+    if filename.endswith(('.fits','.fits.gz','.fz')) or (filetype == 'fits'):
+        data = read_fits(filename)
+    elif filename.endswith(('.ecsv','.ecsv.gz')) or (filetype == 'ecsv'):
+        data = read_ecsv(filename)
+    elif filename.endswith(('.csv','.csv.gz')) or (filetype == 'csv'):
+        data = read_csv(filename, float32)
+    else:
+        msg = f"Unrecognized file format: {filename}"
+        raise Exception(msg)
+
+    nrows = len(data)
+    logger.info("%i objects found"%nrows)
+    if not nrows: 
+        return
 
     names = list(data.dtype.names)
     if ('RA' not in names) and ('DEC' not in names):
@@ -84,17 +124,43 @@ def readfile(filename,float32=False):
 
     return data
 
-def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=False,
-             float32=False,nest=False):
+def snr_select(data, snr=20):
+    print("WARNING: Horrible SNR Hack!!!")
+    olderr = np.seterr(invalid='ignore',divide='ignore')
+    sel = (data['FLUX_PSF']/data['FLUXERR_PSF']) >= snr
+    np.seterr(**olderr)
+    return sel
+
+def pixelize(infiles, outdir='hpx', outbase=HPXBASE, nside=16, force=False,
+             filetype=None, float32=False, nest=False):
     """
     Break catalog up into a set of healpix files.
+
+    Parameters
+    ----------
+    infiles : list of input files
+    outdir  : output directory
+    outbase : output file basename
+    nside   : output file nside
+    force   : force overwrite
+    filetype: input file type
+    float32 : cast csv input to float32
+    nest    : output file nest scheme
+
+    Returns
+    -------
+    None
     """
 
     mkdir(outdir)
-    outfiles = glob.glob(outdir+'/*.fits')
-    if len(outfiles) and not force:
-        msg = "Found files: %s"%glob.glob(outdir+'/*.fits')
-        raise Exception(msg)
+    outfiles = sorted(glob.glob(outdir+'/*.fits'))
+    if len(outfiles):
+        if not force:
+            msg = "Found files: %s"%outfiles
+            raise Exception(msg)
+        else:
+            msg  = "Appending to files: %s"%outfiles
+            print(msg)
 
     #if len(outfiles): 
     #    print("Removing existing files...")
@@ -102,9 +168,12 @@ def pixelize(infiles,outdir='hpx',outbase=HPXBASE,nside=16,gzip=False,force=Fals
 
     for i,infile in enumerate(infiles):
         logger.info('(%i/%i) %s'%(i+1, len(infiles), infile))
-        data = readfile(infile,float32)
+        data = read_file(infile, filetype, float32)
         if data is None: continue
-
+        #### ADW: Horrible Hack to make SNR cut!!!
+        #data = data[snr_select(data, snr=100)]
+        #if not len(data): continue
+        
         catalog_pix = hp.ang2pix(nside,data['RA'],data['DEC'],nest=nest,lonlat=True)
         #### Add object pixel (hack to get correct byte order)
         #object_pix = ang2pix(NSIDE_OBJ,data['RA'],data['DEC'],nest=True)
@@ -158,10 +227,14 @@ if __name__ == "__main__":
                         help='output nside')
     parser.add_argument('--nest',action='store_true',
                         help='nested ordering')
+    parser.add_argument('-t','--filetype',default=None, choices=['fits','csv','ecsv'],
+                        help='specify input filetype')
     parser.add_argument('--float32',action='store_true',
                         help='convert columns to float32 (excludes RA,DEC)')
     parser.add_argument('-f','--force',action='store_true',
                         help='append to existing files')
+    parser.add_argument('-r','--reverse',action='store_true',
+                        help='reverse input order')
     parser.add_argument('-v','--verbose',action='store_true',
                         help='output verbosity')
     args = parser.parse_args()
@@ -170,7 +243,7 @@ if __name__ == "__main__":
     if args.ra_dec:
         ALT_RADEC_COLUMNS = [args.ra_dec] + ALT_RADEC_COLUMNS
 
-    if os.path.isfile(args.input): 
+    if os.path.isfile(args.input):
         if args.input.endswith(('.txt','.dat')):
             infiles = np.atleast_1d(np.loadtxt(args.input,dtype=str))
         else: 
@@ -178,12 +251,14 @@ if __name__ == "__main__":
             raise IOError(msg)
     elif os.path.isdir(args.input):
         # Grab fits or csv files
-        for ext in ['.fits','.fits.gz','.csv','.csv.gz']:
+        for ext in ['.fits','.fits.gz','.csv','.csv.gz','.ecsv','.ecsv.gz']:
             infiles = sorted(glob.glob(args.input+'/*'+ext))
+            if args.reverse: infiles = infiles[::-1]
             if infiles: break
     else:
         msg = "Unrecognized input: %s"%args.input
         raise IOError(msg)
 
-    pixelize(infiles,args.outdir,args.outbase,nside=args.nside,
-             force=args.force,float32=args.float32,nest=args.nest)
+    pixelize(infiles, args.outdir, args.outbase, nside=args.nside,
+             force=args.force, filetype=args.filetype,
+             float32=args.float32, nest=args.nest)

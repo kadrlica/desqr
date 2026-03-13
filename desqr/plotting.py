@@ -26,6 +26,11 @@ except ModuleNotFoundError:
     from .const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
     from .utils import bfields, load_infiles, setdefaults, isstring
 
+viridis_w = plt.cm.viridis.copy()
+viridis_w.set_under('none')
+gray_w = plt.cm.gray.copy()
+gray_w.set_under('none')
+    
 def draw_peak(peak,**kwargs):
     kwargs.setdefault('ls','--')
     kwargs.setdefault('label','%.1f '%(peak))
@@ -242,7 +247,7 @@ def draw_maglites(hpxmap,**kwargs):
     from skymap.survey import MaglitesSkymap
     smap = MaglitesSkymap()
     smap.draw_maglites()
-    return smap,smap.draw_hpxmap(**kwargs)
+    return smap,smap.draw_hpxmap(hpxmap,**kwargs)
 
 def draw_bliss(hpxmap,**kwargs):
     """ Draw BLISS footprint:

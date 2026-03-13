@@ -12,11 +12,11 @@ import fitsio
 import numpy as np
 import healpy as hp
 
-from utils import mkdir
-from const import OBJECT_ID
+from desqr.utils import mkdir
+from desqr.const import OBJECT_ID
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     parser.set_defaults(njobs=12) 
     parser.add_argument('-m','--mlimit',default=40,type=int,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Generic python script.
+Homogenize a list of exposures to a given depth/number of exposures.
 """
 __author__ = "Alex Drlica-Wagner"
 import os,sys
@@ -15,7 +15,7 @@ BANDS = ['g','r','i','z']
 NSIDE = 1024
 DECAM = 1.1 #deg
 
-def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
+def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10, expnums=None):
     """ Select a subset of exposures to yield uniform depth (in
     teff*texp and number of exposures) over the sky.
 
@@ -25,6 +25,7 @@ def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
     percent : fraction overlap for calculating thresholds
     sum_thresh : threshold in the summed depth
     num_thresh : threshold in the number of exposures    
+    expnums : preferred exposures
 
     Returns
     -------
@@ -36,6 +37,11 @@ def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
     idx = np.argsort(sortby)[::-1]
     data = data[idx]
 
+    # Give preferred exposures higher preference
+    if expnums is not None:
+        sel = np.in1d(data['expnum'], expnums)
+        data = np.concatenate([data[sel], data[~sel]])
+    
     # Break exposures into bands
     exposures = odict([(b,data[data['band']==b]) for b in BANDS])
 
@@ -55,7 +61,7 @@ def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
     rad = np.radians(DECAM)
 
     for band in BANDS:
-        print band
+        print(band)
         _sum = sum_skymaps[band]
         _max = max_skymaps[band]
         _num = num_skymaps[band]
@@ -65,7 +71,7 @@ def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
         vec = hp.ang2vec(exps['ra'],exps['dec'],lonlat=True)
         # Loop through exposures
         for i,(v,d) in enumerate(zip(vec,exps)):
-            print '\r%s/%s'%(i+1,len(vec)),
+            print('\r%s/%s'%(i+1,len(vec)),end='')
             sys.stdout.flush()
             pix = hp.query_disc(NSIDE,v,rad,inclusive=False,fact=4,nest=False)
             
@@ -87,7 +93,9 @@ def homogenize(data, percent=90, sum_thresh=10*0.3*90, num_thresh=10):
         _sum[_sum==0] = np.nan
         _max[_max==0] = np.nan
         _num[_num==0] = np.nan
-        print
+        print()
+        print(f" num: {sel_num[band].sum()}/{len(vec)}")
+        print(f" sum: {sel_sum[band].sum()}/{len(vec)}")
 
     sum_exps = odict([(b,exposures[b][sel]) for b,sel in sel_sum.items()])
     num_exps = odict([(b,exposures[b][sel]) for b,sel in sel_num.items()])
@@ -97,7 +105,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('filename',default='delve_wide_r2_v2.csv')
-    parser.add_argument('--num',default=10,type=int,
+    parser.add_argument('--num',default=15,type=int,
                         help="threshold on overlapping exposures")
     parser.add_argument('--sum',default=270,type=float,
                         help="threshold on total effective exposure time (s)")
@@ -126,10 +134,10 @@ if __name__ == "__main__":
 
     outbase = os.path.splitext(os.path.basename(args.filename))[0]
 
-    outfile = outbase + '_sum.csv'
+    outfile = outbase + f'_sum{args.sum}.csv'
     print("Writing %s..."%outfile)
     sum_out.to_csv(outfile,index=False)
 
-    outfile = outbase + '_num.csv'
+    outfile = outbase + f'_num{args.num}.csv'
     print("Writing %s..."%outfile)
     num_out.to_csv(outfile,index=False)

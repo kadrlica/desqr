@@ -3,12 +3,12 @@
 import os
 import subprocess
 
-from utils import mkdir
+from desqr.utils import mkdir
 
 SECTIONS = ['footprint','stargal','color','astrometry','depth','photometry']
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     parser.set_defaults(njobs=8) 
     parser.add_argument('--nproc', default=1, type=int,
@@ -147,12 +147,12 @@ if __name__ == "__main__":
         #exe = 'python ' + os.path.join(path,exe)
         
         types = [
-            #['wavg_rms' , ['g','r','i','z']],
-            #['hpx_rms'  , ['g','r','i','z']],
+            ['wavg_rms' , ['g','r','i','z']],
+            ['hpx_rms'  , ['g','r','i','z']],
             #['des_dr2'  , ['g','r','i','z']],
             #['gaia_dr2' , ['griz']],
             #['gaia_edr3', ['griz']],
-            ['gaia_dr3', ['griz']],
+            #['gaia_dr3', ['griz']],
         ]
 
         for t,bands in types:

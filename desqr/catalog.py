@@ -14,13 +14,12 @@ import numpy.lib.recfunctions as recfuncs
 import healpy as hp
 import scipy.ndimage as nd
 
-import const
-from const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
-from const import BADMAG, BADVAL
-import utils
-from utils import bfield, bfields, load_infiles, verbose
-
-from ugali.utils.logger import logger
+from desqr import const
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
+from desqr.const import BADMAG, BADVAL
+from desqr import utils
+from desqr.utils import bfield, bfields, load_infiles, verbose
+from desqr.logger import logger
 
 ##################################################
 ################# Input columns #################$
@@ -528,6 +527,15 @@ def quality_cuts(cat,key=None):
     nobjs = len(cat)
     sel = np.zeros(nobjs,dtype=bool)
 
+    # Objects with less than the minimum number of detections
+    columns = bfields(['NEPOCHS'],BANDS)
+    # Hard to supress this (should be gone in numpy >= 1.16)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        epochs = utils.unstructure(cat[columns])
+
+    sel |= (np.sum(epochs, axis=1) >= MINEPOCHS)
+
     # Objects with detections in the minimum number of bands.
     columns = bfields(['MAG_PSF'],BANDS)
     # Hard to supress this (should be gone in numpy >= 1.16)
@@ -535,8 +543,9 @@ def quality_cuts(cat,key=None):
         warnings.simplefilter("ignore")
         mags = utils.unstructure(cat[columns])
 
-    sel |= (np.sum(mags < BADMAG, axis=1) >= MINBANDS)
-    
+    sel &= (np.sum(mags < BADMAG, axis=1) >= MINBANDS)
+
+
     """
     # Objects with r,i,z
     mags = cat[bfields(['MAG_PSF','MAG_AUTO'],BANDS)].view(np.float).reshape((cat.size,-1))
@@ -588,19 +597,22 @@ if __name__ == "__main__":
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-b','--bands',default=None,action='append')
     parser.add_argument('--min-bands',default=None,type=int)
+    parser.add_argument('--min-epochs',default=None,type=int)
     parser.add_argument('--ebv',default=None)
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
-    if vars(opts).get('verbose'): logger.setLevel(logger.DEBUG)
-    if opts.bands: BANDS = opts.bands
-    if opts.min_bands: MINBANDS = opts.min_bands
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
-    if os.path.exists(opts.outfile) and not opts.force:
-        logger.warning("Found %s; skipping..."%opts.outfile)
+    if args.bands: BANDS = args.bands
+    if args.min_bands: MINBANDS = args.min_bands
+    if args.min_epochs: MINEPOCHS = args.min_epochs
+
+    if os.path.exists(args.outfile) and not args.force:
+        logger.warning("Found %s; skipping..."%args.outfile)
         sys.exit()
 
-    logger.info("Loading files: %s"%opts.infiles)
-    data = load_infiles(opts.infiles,INPUT_COLS)
+    logger.info("Loading files: %s"%args.infiles)
+    data = load_infiles(args.infiles,INPUT_COLS)
     logger.info("All objects: %i"%len(data))
 
     good = good_objects(data)
@@ -613,17 +625,17 @@ if __name__ == "__main__":
     cat,key = coadd_objects(good,bands=BANDS)
     logger.info("Unique objects: %i"%len(cat))
 
-    cat = calculate_extinction(cat,bands=BANDS,ebvmap=opts.ebv)
+    cat = calculate_extinction(cat,bands=BANDS,ebvmap=args.ebv)
     cat = calculate_extended_class(cat,bands=BANDS)
  
     catalog,keys = quality_cuts(cat,key)
     check_keys(catalog,keys)
     logger.info("Quality objects: %i"%len(catalog))
 
-    if opts.outfile and len(catalog):
-        logger.info("Writing %s..."%opts.outfile)
-        utils.write(opts.outfile,catalog,force=opts.force)
+    if args.outfile and len(catalog):
+        logger.info("Writing %s..."%args.outfile)
+        utils.write(args.outfile,catalog,force=args.force)
 
-    if opts.keyfile and len(keys):
-        logger.info("Writing %s..."%opts.keyfile)
-        utils.write(opts.keyfile,keys,force=opts.force)
+    if args.keyfile and len(keys):
+        logger.info("Writing %s..."%args.keyfile)
+        utils.write(args.keyfile,keys,force=args.force)

@@ -1,1 +1,1 @@
-check.py
+../desqr/check.py

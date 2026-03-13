@@ -4,7 +4,6 @@ Characterize photometric scatter.
 """
 __author__ = "Alex Drlica-Wagner"
 import os
-from os.path import join
 import glob
 import yaml
 from collections import OrderedDict as odict
@@ -23,33 +22,35 @@ import fitsio
 from ugali.utils.healpix import ang2pix, pix2ang
 import ugali.utils.projector
 from ugali.utils.projector import angsep
-from ugali.utils.shell import mkdir
-from ugali.utils.logger import logger
 
-import utils
-from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG
-from utils import bfield, bfields, load_infiles
-from utils import blank, rec_append_fields
-from match import match_query
+from desqr import utils
+from desqr.utils import bfield, bfields, load_infiles
+from desqr.utils import blank, rec_append_fields
+from desqr.utils import mkdir
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG
+from desqr.match import match_query
+from desqr.logger import logger
+from desqr import plotting
+from desqr.catalog import good_objects
 
-import plotting
-from catalog import good_objects
-
-TYPES = ['gaia','gaia_dr2','gaia_edr3','des','des_dr2','hpx_rms','wavg_rms']
+TYPES = ['gaia','gaia_dr2','gaia_edr3','gaia_dr3',
+         'des','des_dr2','hpx_rms','wavg_rms']
 COLUMNS = [OBJECT_ID,'RA','DEC']
 GAIA_DIR = {
-    'dr2':'/data/des40.b/data/gaia/dr2/healpix/',
-    'edr3':'/data/des40.b/data/gaia/edr3/healpix/',
+    'dr2':'/data/delve01.b/data/gaia/dr2/healpix/',
+    'edr3':'/data/delve01.b/data/gaia/edr3/healpix/',
+    'dr3':'/data/delve01.b/data/gaia/dr3/healpix/',    
 }
 
 DES_BASE = {
-    'dr2':'/data/des40.b/data/des/dr2/healpix/dr2_main_%05d.fits',
+    'dr2':'/data/delve01.b/data/des/dr2/healpix/dr2_main_%05d.fits',
 }
 
 def plot_photometry(filename,outfile=None,survey='delve'):
     logger.info("Reading %s..."%filename)
     hpxmap = hp.read_map(filename,verbose=False)
     hpxmap *= 1000 # mmag
+    hpxmap = np.ma.MaskedArray(hpxmap,np.isnan(hpxmap),fill_value=np.nan)
 
     cbar_kwargs = dict()
     hpxmap_kwargs = dict(xsize=2000)
@@ -59,8 +60,8 @@ def plot_photometry(filename,outfile=None,survey='delve'):
         label = 'MAG RMS (mmag)'
     elif '_gaia_' in filename: 
         label = r'$\Delta$(Gaia G) (mmag)'
-        hpxmap_kwargs['vmin'] = vmin = -30
-        hpxmap_kwargs['vmax'] = vmax = 30
+        hpxmap_kwargs['vmin'] = vmin = -15
+        hpxmap_kwargs['vmax'] = vmax = 15
         hist_kwargs['bins'] = np.linspace(vmin,vmax)
     elif '_des_' in filename:  
         label = r'$\Delta$(DES) (mmag)'
@@ -78,7 +79,7 @@ def plot_photometry(filename,outfile=None,survey='delve'):
     #axes[0].annotate('%s band'%band, (0.05,0.93), xycoords='axes fraction')
     axes[1].set_xlabel(label)
 
-    utils.print_statistics(hpxmap)
+    utils.print_statistics(hpxmap, unit='mmag')
 
     if outfile is None: 
         outfile=os.path.basename(filename).split('.')[0]+'.png'
@@ -108,15 +109,19 @@ def get_gaia_catalog(hpx,columns=['RA','DEC','PHOT_G_MEAN_FLUX'],version='dr2'):
     cat = load_infiles(filenames,columns=columns)
 
     # Need to put the Gaia flux onto the AB system
-    if version == 'edr3':
+    if version in ('edr3', 'dr3'):
         #https://www.cosmos.esa.int/web/gaia/edr3-passbands
         gzp_g = 25.8010446445
-    elif version == 'dr2':
+    elif version in ('dr2'):
         # For magnitudes published in Gaia DR2
         #https://www.cosmos.esa.int/web/gaia/iow_20180316
         gzp_g = 25.7933969562 
-
-    mag_G = gzp_g - 2.5*np.log10(cat['PHOT_G_MEAN_FLUX'])
+    else:
+        msg = "Undefined Gaia zeropoint"
+        raise Exception(msg)
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mag_G = gzp_g - 2.5*np.log10(cat['PHOT_G_MEAN_FLUX'])
 
     cat = rec_append_fields(cat,'PHOT_G_MEAN_MAG_AB',mag_G)
     return cat
@@ -178,13 +183,13 @@ def gaia_transform(g, r, i, z, version='dr2'):
     fnuPrime[:, 2] = fudgeFactors[2] * (S[:, 1] + S[:, 2]) / 2.0
     fnuPrime[:, 3] = S[:, 2] + fudgeFactors[3] * ((lambdaStd[3] - lambdaStd[2]) / (lambdaStd[3] - lambdaStd[1])) * (S[:, 2] - S[:, 1])
 
-    if version=='dr2':
+    if version in ('dr2'):
         # DR2 fit parameters
         pars = [ 1.43223290e+00,  1.50877061e+00, 8.43173013e-01, -5.99023967e-04, 
                  4.06188382e-01,  3.11181978e-01, 2.51002598e-01,  1.00000000e-05,  
                  4.94284725e-03,  1.80499806e-03]
 
-    elif version=='edr3':
+    elif version in ('edr3', 'dr3'):
         # EDR3: Notice that the last two parameters (describing the
         # r-offset curvature due to background issues) are much smaller.
         pars = [ 2.61815727e+00,  2.69372875e+00,  1.45644592e+00, -5.99023051e-04,
@@ -193,7 +198,8 @@ def gaia_transform(g, r, i, z, version='dr2'):
 
         fudgeShift = 2.4e-3 # Additive shift in peak (mag)
     else:
-        raise Exception("Unrecognized Gaia version: %s"%version)
+        msg = "Unrecognized Gaia version: %s"%version
+        raise Exception(msg)
 
     i10g,i10r,i10i,i10z = pars[0:4]
     kg,kr,ki,kz = pars[4:8]
@@ -214,7 +220,7 @@ def gaia_match(filename,version='edr3',verbose=True):
     Parameters
     ----------
     filename : catalog filename
-    version  : Gaia catalog version ['dr2', 'edr3']
+    version  : Gaia catalog version ['dr2', 'dr3']
 
     Returns
     -------
@@ -285,7 +291,7 @@ def gaia_match_fgcm(filename,version='edr3',verbose=True):
     Parameters
     ----------
     filename : catalog filename
-    version  : Gaia catalog version ['dr2', 'edr3']
+    version  : Gaia catalog version ['dr2', 'dr3']
 
     Returns
     -------
@@ -580,7 +586,7 @@ def hpx_rms_photometry(filename,nside=64,band=None,plot=False):
     #hpx = ang2pix(NSIDE, cat['RA'], cat['DEC'])
     ra,dec = hp.pix2ang(NSIDE, hpx, lonlat=True)
     msg = '%s (RA,DEC) = %.2f,%.2f'%(os.path.basename(filename),ra,dec)
-    print(msg)
+    logger.info(msg)
 
     cat = load_infiles([filename],columns)
 
@@ -590,12 +596,12 @@ def hpx_rms_photometry(filename,nside=64,band=None,plot=False):
     cat = cat[sel]
 
     if len(cat) == 0:
-        msg = "WARNING: No objects passing selection in: %s"%filename
-        print(msg)
+        msg = "No objects passing selection in: %s"%filename
+        logger.warn(msg)
         return np.array([],dtype=int), np.array([])
 
     # Calculate "per object" quantities
-    df = pd.DataFrame(cat.byteswap().newbyteorder())
+    df = pd.DataFrame(cat)
     grp = df.groupby(objid)
     ra = grp['RA'].median()
     dec = grp['DEC'].median()
@@ -617,7 +623,7 @@ if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',help='configuration file')
+    parser.add_argument('configfile',help='configuration file')
     parser.add_argument('-b','--band',default='r',choices=BANDS+['griz'])
     parser.add_argument('-n','--nside',default=128,type=int)
     parser.add_argument('-o','--outbase',default='photo')
@@ -627,10 +633,12 @@ if __name__ == "__main__":
     parser.add_argument('--nproc',default=4,type=int)
     args = parser.parse_args()
 
-    print('Calculating photometric offsets...')
+    if args.verbose: logger.setLevel(logger.DEBUG)
+
+    logger.info('Calculating photometric offsets...')
     band = args.band
 
-    config = yaml.safe_load(open(args.config))
+    config = yaml.safe_load(open(args.configfile))
     OBJECT_ID = config.get('objid',OBJECT_ID)
     NSIDE = config['nside']
     catdir  = config['catdir']
@@ -639,36 +647,41 @@ if __name__ == "__main__":
 
     # Output nside
     nside = args.nside
-    #outdir = mkdir('release/photometry')
-    outdir  = './'
+    outdir = mkdir('release/photometry')
+    #outdir  = './'
     outbase = args.outbase
 
     kwargs = dict(nside=args.nside,band=band)
-    if args.type in ('gaia','gaia_edr3'):
+    if args.type in ('gaia', 'gaia_dr3'):
+        func = gaia_photometry
+        kwargs['version'] = 'dr3'
+        outbase += '_gaia_%(version)s'%kwargs
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
+    elif args.type in ('gaia_edr3'):
         func = gaia_photometry
         kwargs['version'] = 'edr3'
         outbase += '_gaia_%(version)s'%kwargs
-        print("Calculating offsets to Gaia %(version)s..."%kwargs)
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
     elif args.type == 'gaia_dr2':
         func = gaia_photometry
         kwargs['version'] = 'dr2'
         outbase += '_gaia_%(version)s'%kwargs
-        print("Calculating offsets to Gaia %(version)s..."%kwargs)
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
     elif args.type == 'des_dr2':
         func = des_photometry
         kwargs['version'] = 'dr2'
         outbase += '_des_%(version)s_%(band)s'%kwargs
-        print("Calculating offsets to DES %(version)s..."%kwargs)
+        logger.info("Calculating offsets to DES %(version)s..."%kwargs)
     elif args.type == 'wavg_rms':
         func = wavg_rms_photometry
         outbase += '_%s_%s'%(args.type,band)
-        print("Calculating %s in %s band..."%(args.type,band))
+        logger.info("Calculating %s in %s band..."%(args.type,band))
     elif args.type == 'hpx_rms':
         filebase = os.path.join(config['hpxdir'],'{band:s}',config['hpxbase'])
         filebase = filebase.format(band=band)
         func = hpx_rms_photometry
         outbase += '_%s_%s'%(args.type,band)
-        print("Calculating %s in %s band..."%(args.type,band))
+        logger.info("Calculating %s in %s band..."%(args.type,band))
     else:
         msg = "Unrecognized type: %s"%args.type
         raise Exception(msg)
@@ -700,7 +713,7 @@ if __name__ == "__main__":
     # Args must be tuple
     print("Processing %i files..."%len(filenames))
 
-    arglist = zip(filenames)
+    arglist = list(zip(filenames))
 
     results = utils.multiproc(func,arglist,kwargs,processes=args.nproc)
      
@@ -720,7 +733,8 @@ if __name__ == "__main__":
     q = [5,50,95]
     p = np.percentile(hpxmap.compressed(),q)
     print("Global Photometric Percentiles:")
-    print('%s (%s%%)'%(p,q))
+    print(' '.join(['%-5s'%(str(_q)+'%') for _q in q]))
+    print(' '.join(['%-3.1f '%(1000*_p) for _p in p])+' mmag')
 
     print("Plotting %s..."%outfile)
     pngfile = outfile.replace('.fits.gz','.png')

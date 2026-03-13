@@ -1,20 +1,19 @@
 #!/usr/bin/env python
 """ Check the integrety of pipeline processing. """
-import sys
-import os
+import os, sys
 from os.path import join, basename
 import glob
 from termcolor import colored as color
-import logging
 from multiprocessing import Pool
 from multiprocessing import Process, Value, Lock
 
 import yaml
-import fitsio
 import numpy as np
+import pandas as pd
+import fitsio
 
-from const import BANDS,OBJECT_ID,UNIQUE_ID,BADMAG
-from utils import bfields
+from desqr.const import BANDS,OBJECT_ID,UNIQUE_ID,BADMAG
+from desqr.utils import bfields
 
 SECTIONS = ['download','pixelize','match','zeropoint','catalog','nan']
 OK  = color('OK','green')
@@ -57,8 +56,8 @@ def print_points(idx,total,indent=0,step=10):
 def dir_exists(dirname):
     if not os.path.exists(dirname):
         msg = "No directory:"
-        print color(msg,'red')
-        print dirname
+        print(color(msg,'red'))
+        print(dirname)
         return False
     return True
 
@@ -83,32 +82,23 @@ def check_files(explist,files):
     """ Check that file exist """
     exp = explist
     nfiles = len(files)
-    unit = np.array([basename(f).split('_')[0] for f in files])
-    missing = ~np.in1d(exp['unitname'],unit)
-    extra = ~np.in1d(unit,exp['unitname'])
+
+    unitname = np.char.partition(np.char.rpartition(files,'/')[:,-1],'_')[:,0]
+    expnum = np.char.strip(unitname, 'D').astype(int)
+    missing = ~np.in1d(exp['expnum'],expnum)
+    extra = ~np.in1d(expnum,exp['expnum'])
     
     print_running(nfiles,nfiles,indent=4)
     if missing.sum():
         msg = "Missing %s file(s):"%missing.sum()
-        print color(msg,'red')
-        print 4*' '+'%s'%exp['unitname'][missing]
+        print(color(msg,'red'))
+        print(4*' '+'%s'%exp['expnum'][missing])
     elif extra.sum():
         msg = "  Found %s extra file(s):"%extra.sum()
-        print color(msg,'red')
-        print 4*' '+'%s'%unit[extra]
-    else: print OK
-
-    print_running(nfiles,nfiles,indent=4)
-    if missing.sum():
-        msg = "Missing %s file(s):"%missing.sum()
-        print color(msg,'red')
-        print 4*' '+'%s'%exp['unitname'][missing]
-    elif extra.sum():
-        msg = "Extra %s file(s):"%extra.sum()
-        print color(msg,'red')
-        print 4*' '+'%s'%unit[extra]
-    else: print OK
-
+        print(color(msg,'red'))
+        print(4*' '+'%s'%expnum[extra])
+    else: print(OK)
+    
 def count_objects(args):
     """ Count the number of objects """
     global counter
@@ -125,7 +115,7 @@ def count_objects(args):
     # Ignore low numbers of objects in pixelized files
     if (not hpx) and (num < 5e3 if band=='Y' else num < 1e4):
         msg = "Only %i objects in %s"%(num,f)
-        print color(msg,'yellow')
+        print(color(msg,'yellow'))
 
     return num
 
@@ -142,7 +132,7 @@ def check_columns(args,columns=None,select=None,msg=None):
     except ValueError as e:
         msg = "Couldn't read %(columns)s from %(filename)s"
         msg = msg%dict(columns=columns,filename=f)
-        print color(msg,'red')
+        print(color(msg,'red'))
         return True
     
     sel = select(data)
@@ -150,11 +140,11 @@ def check_columns(args,columns=None,select=None,msg=None):
         #if not msg: msg = "Bad %(columns)s value in %(filename)s"
         #msg = msg%dict(columns=columns,filename=f)
         if msg: 
-            print msg%dict(columns=columns,filename=f)
+            print(msg%dict(columns=columns,filename=f))
         if not isinstance(sel,(bool,type(np.bool))):
             msg = "Bad %(columns)s value in %(filename)s"
-            print msg%dict(columns=columns,filename=f)
-            print 4*' '+bad_values_str(data[sel])
+            print(msg%dict(columns=columns,filename=f))
+            print(4*' '+bad_values_str(data[sel]))
         return True
 
     return False
@@ -209,7 +199,7 @@ def check_match(args):
         bad = (frac < 0.1) and (nobjs > 1e4)
         if bad:
             msg = 'Match fraction = %.2f;'%frac
-            print color(msg,'yellow'),
+            print(color(msg,'yellow'),end="")
         return bad
     msg = color("Poor match in %(filename)s",'yellow')
     kwargs = dict(columns=bfields('NEPOCHS',band),select=select,msg=msg)
@@ -242,20 +232,16 @@ def check_header_keys(args):
     return keys[~np.in1d(keys,names)]
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('config')
-    parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('-b','--band',dest='bands',default=None,
-                        action='append',choices=BANDS)
+    from desqr.parser import Parser
+    parser = Parser(description=__doc__)
     parser.add_argument('-s','--section',dest='sections',default=None,
                         action='append',choices=SECTIONS)
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
-    config = yaml.load(open(opts.config))
-    sections = opts.sections if opts.sections else SECTIONS
+    config = args.config
+    sections = args.sections if args.sections else SECTIONS
 
-    bands  = opts.bands if opts.bands else config['bands']
+    bands  = args.bands if args.bands else config['bands']
     BANDS  = bands
     rawdir = config['rawdir']
     hpxdir = config['hpxdir']
@@ -269,12 +255,12 @@ if __name__ == "__main__":
     CATCOUNT = None
 
     for band in bands:
-        print '\n'+80*'-'
-        print "Checking band: %s"%(band)
-        print 2*' '+str(sections)
+        print('\n'+80*'-')
+        print("Checking band: %s"%(band))
+        print(2*' '+str(sections))
 
         for section in sections:
-            print "\nChecking '%s'..."%section
+            print("\nChecking '%s'..."%section)
 
             ##############################
             if section == 'download':
@@ -289,29 +275,29 @@ if __name__ == "__main__":
                 else:
                     files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
+                arglist = [(f,nfiles,band) for f in files]
 
-                print 2*' '+"Files:"
-                exp = np.recfromcsv(config['explist'])
+                print(2*' '+"Files:")
+                exp = pd.read_csv(config['explist']).to_records(index=False)
                 exp = exp[exp['band']==band]
                 check_files(exp,files)
 
-                print 2*' '+"Objects:"
-                out = run_pool(count_objects,args)
+                print(2*' '+"Objects:")
+                out = run_pool(count_objects,arglist)
                 RAWCOUNT = np.sum(out)
-                print RAWCOUNT, OK
+                print(RAWCOUNT, OK)
                 
-                print 2*' '+"CCDNUM:"
-                out = run_pool(check_ccdnum,args)
-                print FAIL if np.any(out) else OK
-
-                print 2*' '+"RA:"
-                out = run_pool(check_ra,args)
-                print FAIL if np.any(out) else OK
-                
-                print 2*' '+"Fluxes:"
-                out = run_pool(check_flux,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"CCDNUM:")
+                out = run_pool(check_ccdnum,arglist)
+                print(FAIL if np.any(out) else OK)
+                 
+                print(2*' '+"RA:")
+                out = run_pool(check_ra,arglist)
+                print(FAIL if np.any(out) else OK)
+                 
+                print(2*' '+"Fluxes:")
+                out = run_pool(check_flux,arglist)
+                print(FAIL if np.any(out) else OK)
 
                 # Check that the columns and dtypes are the same in
                 # all files...
@@ -325,20 +311,20 @@ if __name__ == "__main__":
 
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
+                arglist = [(f,nfiles,band) for f in files]
 
-                print 2*' '+"Objects:"
-                out = run_pool(count_objects,args)
+                print(2*' '+"Objects:")
+                out = run_pool(count_objects,arglist)
                 HPXCOUNT = np.sum(out)
-                print HPXCOUNT
+                print(HPXCOUNT)
 
                 if RAWCOUNT is not None:
-                    print 4*' '+"raw: %i | hpx: %i"%(RAWCOUNT,HPXCOUNT),
-                    print FAIL if RAWCOUNT != HPXCOUNT else OK
+                    print(4*' '+"raw: %i | hpx: %i"%(RAWCOUNT,HPXCOUNT),end="")
+                    print(FAIL if RAWCOUNT != HPXCOUNT else OK)
 
-                print 2*' '+"RA:"
-                out = run_pool(check_ra,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"RA:")
+                out = run_pool(check_ra,arglist)
+                print(FAIL if np.any(out) else OK)
 
             ##############################
             if section == 'match':
@@ -347,11 +333,11 @@ if __name__ == "__main__":
                 
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
+                arglist = [(f,nfiles,band) for f in files]
 
-                print "  Object IDs:"
-                out = run_pool(check_objid,args)
-                print FAIL if np.any(out) else OK
+                print("  Object IDs:")
+                out = run_pool(check_objid,arglist)
+                print(FAIL if np.any(out) else OK)
                     
             ##############################
             if section == 'zeropoint':
@@ -360,15 +346,15 @@ if __name__ == "__main__":
 
                 files = sorted(glob.glob(dirname+'/*.fits'))
                 nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
+                arglist = [(f,nfiles,band) for f in files]
 
-                print 2*' '+"Zeropoints:"
-                out = run_pool(check_zeropoint,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"Zeropoints:")
+                out = run_pool(check_zeropoint,arglist)
+                print(FAIL if np.any(out) else OK)
 
-                print 2*' '+"Magnitudes:"
-                out = run_pool(check_magnitude,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"Magnitudes:")
+                out = run_pool(check_magnitude,arglist)
+                print(FAIL if np.any(out) else OK)
             
             ##############################
             if section == 'catalog':
@@ -377,22 +363,22 @@ if __name__ == "__main__":
                 
                 files = sorted(glob.glob(catdir+'/*.fits'))
                 nfiles = len(files)
-                args = [(f,nfiles,band) for f in files]
+                arglist = [(f,nfiles,band) for f in files]
 
                 CATCOUNT = 0
 
-                print 2*' '+"Objects:"
-                out = run_pool(count_objects,args)
+                print(2*' '+"Objects:")
+                out = run_pool(count_objects,arglist)
                 CATCOUNT = np.sum(out)
-                print CATCOUNT, OK
+                print(CATCOUNT, OK)
                  
-                print 2*' '+"RA:"
-                out = run_pool(check_ra,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"RA:")
+                out = run_pool(check_ra,arglist)
+                print(FAIL if np.any(out) else OK)
 
-                print 2*' '+"Match Fraction:"
-                out = run_pool(check_match,args)
-                print FAIL if np.any(out) else OK
+                print(2*' '+"Match Fraction:")
+                out = run_pool(check_match,arglist)
+                print(FAIL if np.any(out) else OK)
 
     if 'nan' in sections:
         if not dir_exists(catdir): pass
@@ -400,11 +386,11 @@ if __name__ == "__main__":
         
         files = sorted(glob.glob(catdir+'/*.fits'))
         nfiles = len(files)
-        args = [(f,nfiles,band) for f in files]
+        arglist = [(f,nfiles,band) for f in files]
 
-        print 2*' '+"NaN:"
-        out = run_pool(check_nan,args)
-        print FAIL if np.any(out) else OK
+        print(2*' '+"NaN:")
+        out = run_pool(check_nan,arglist)
+        print(FAIL if np.any(out) else OK)
 
-    print "\nDone."
+    print("\nDone.")
                 

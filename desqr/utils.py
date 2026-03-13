@@ -8,7 +8,6 @@ from collections import OrderedDict as odict
 from functools import wraps
 import six
 import warnings
-import logging
 
 import numpy as np
 import numpy.lib.recfunctions as rfn
@@ -17,8 +16,7 @@ import fitsio
 import healpy as hp
 
 # Need to do better with the logging...
-from ugali.utils.logger import logger
-#import logging as logger
+from desqr.logger import logger
 
 # Tools for working with the shell
 def pwd():
@@ -88,7 +86,6 @@ def multiproc(func, arglist, kwargs={}, processes=20):
     return results
 
 def found(filename):
-    #logger = logging.getLogger()
     logger.warning("Found %s; skipping..."%filename)
 
 def is_found(filename,force=False):
@@ -164,7 +161,9 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
     """
     Insert columns from a recarray into a table in an existing FITS
     file. Input data must have the same length as existing table. By
-    default, several corruption checks are run.
+    default, several corruption checks are run. If column already
+    exists and force=True, then the existing column will be
+    overwritten inplace.
     
     Parameters:
     -----------
@@ -177,19 +176,19 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
     --------
     None
     """
-    #logger = logging.getLogger()
-    logger.info(filename)
+    logger.info("Insert columns: %s"%filename)
     if not os.path.exists(filename):
         msg = "Requested file does not exist."
         raise IOError(msg)
 
     # ADW: Better to use the context manager
 
-    with fitsio.FITS(filename,'rw') as fits:
+    with fitsio.FITS(filename, 'rw') as fits:
         oldnames = fits[ext].get_colnames()
+        olddtype = fits[ext].get_rec_dtype()
         newnames = data.dtype.names
         overlap = np.in1d(oldnames,newnames)
-         
+        
         if np.any(overlap) and not force:
             logger.warning("Found overlapping columns; skipping...")
             return
@@ -206,13 +205,21 @@ def insert_columns(filename,data,ext=1,force=False,check=True):
          
         for col in newnames:
             if col not in oldnames:
-                msg = "Inserting column %s"%col
+                msg = "  Inserting column %s"%col
                 logger.info(msg)
                 fits[ext].insert_column(col,data[col])
             else:
-                msg = "Overwriting column %s"%col
-                logger.warning(msg)
-                fits[ext].write_column(col,data[col])
+                msg = "  Overwriting column %s"%col
+                logger.info(msg)
+
+                try:
+                    fits[ext].write_column(col,data[col])
+                except ValueError as e:
+                    colnum = oldnames.index(col)
+                    dtype = fits[ext].get_rec_dtype()[0][colnum]
+                    msg = "  Casting column to dtype: %s"%dtype
+                    logger.warning(msg)
+                    fits[ext].write_column(col,data[col].astype(dtype))
 
     # The file has already been written, but might as well know...
     if test and check:
@@ -426,7 +433,7 @@ def add_column(filename,column,formula,force=False):
     ADW: Could this be replaced by a ftool?
     """
     columns = parse_formula(formula)
-    logger.info("Running file: %s"%filename)
+    logger.info("Adding column: %s"%filename)
     logger.debug("  Reading columns: %s"%columns)
     data = fitsio.read(filename,columns=columns)
 
@@ -436,6 +443,33 @@ def add_column(filename,column,formula,force=False):
     col = np.asarray(col,dtype=[(column,col.dtype)])
     insert_columns(filename,col,force=force)
     return True
+
+def merge_columns(filename, df, columns, on='EXPNUM', force=False):
+    """ Merge and add a column to a FITS file.
+
+    Parameters
+    ----------
+    filename : input filename
+    df : the DataFrame to merge with
+    columns : columns to add
+    on : column to merge on
+    force : overwrite columns if they already exist
+    
+    Returns
+    -------
+    True
+    """
+    import pandas as pd
+    logger.info("Merging columns: %s"%filename)
+    data = fitsio.read(filename,columns=[on]).byteswap().newbyteorder()
+
+    merged = pd.DataFrame(data).merge(df,left_on=on,right_on=on)
+    assert (merged[on] == data[on]).all()
+
+    out = merged[columns].to_records(index=False)
+    insert_columns(filename, out, force=force)
+    return True
+
 
 def get_vizier_catalog(ra,dec,radius=None,**kwargs):
     import warnings
@@ -465,30 +499,40 @@ def get_local_catalog(ra,dec,radius,catalog,**kwargs):
     -------
     cat : object catalog
     """
-    from ugali.utils.healpix import ang2disc
     name = catalog.lower()
     mapping = {}
+    
     if name in ('gaia_dr1'):
         nside=32
-        dirname = '/data/des40.b/data/gaia/dr1/healpix'
+        #dirname = '/data/des40.b/data/gaia/dr1/healpix'
+        dirname = '/data/delve01.b/data/gaia/dr1/healpix'
         basename = 'GaiaSource_%05d.fits'
         columns = ['SOURCE_ID','RA','DEC']
         #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
     elif name in ('gaia','gaia_dr2'): # Default...
         nside=32
-        dirname = '/data/des40.b/data/gaia/dr2/healpix'
+        #dirname = '/data/des40.b/data/gaia/dr2/healpix'
+        dirname = '/data/delve01.b/data/gaia/dr2/healpix'
         basename = 'GaiaSource_%05d.fits'
         columns = ['SOURCE_ID','RA','DEC']
         #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
     elif name in ('gaia_edr3'):
         nside=32
-        dirname = '/data/des40.b/data/gaia/edr3/healpix'
+        #dirname = '/data/des40.b/data/gaia/edr3/healpix'
+        dirname = '/data/delve01.b/data/gaia/edr3/healpix'
+        basename = 'GaiaSource_%05d.fits'
+        columns = ['SOURCE_ID','RA','DEC']
+        #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
+    elif name in ('gaia_dr3'):
+        nside=32
+        dirname = '/data/delve01.b/data/gaia/dr3/healpix'
         basename = 'GaiaSource_%05d.fits'
         columns = ['SOURCE_ID','RA','DEC']
         #mapping.update({'RA':'_RAJ2000', 'DEC':'_DEJ2000'})
     elif 'atlas' in name:
         nside = 32
-        dirname = '/data/des40.b/data/atlas-refcat2/healpix'
+        #dirname = '/data/des40.b/data/atlas-refcat2/healpix'
+        dirname = '/data/delve01.b/data/atlas-refcat2/healpix'
         basename = 'atlas-refcat2_%05d.fits'
         columns = ['OBJID','RA','DEC','G']
         mapping.update({})
@@ -518,15 +562,16 @@ def print_problem(msg):
     import termcolor as color
     print(color(msg,'red'))
 
-def print_statistics(hpxmap):
+def print_statistics(hpxmap, unit=''):
     q = [5,16,50,84,95]
     p = np.nanpercentile(hpxmap[np.isfinite(hpxmap)],q)
     s68 = (p[3]-p[1])
     std = np.nanstd(hpxmap[np.isfinite(hpxmap)])
-        
-    print("  [%.0f,%.0f,%.0f]%%: %0.1f/%0.1f/%0.1f"%(q[0],q[2],q[4],p[0],p[2],p[4]))
-    print("  68%% Interval: %0.1f"%(s68))
-    print("  STDEV: %0.1f"%(std))
+
+    
+    print("  [%.0f,%.0f,%.0f]%%: %0.1f/%0.1f/%0.1f %s"%(q[0],q[2],q[4],p[0],p[2],p[4], unit))
+    print("  68%% Interval: %0.1f %s"%(s68, unit))
+    print("  STDDEV: %0.1f %s"%(std, unit))
 
     return p,s68,std
 
@@ -543,7 +588,7 @@ def set_memory_limit(mlimit):
     """
     import resource
     rsrc = resource.RLIMIT_AS
-    resource.setrlimit(rsrc, (mlimit, mlimit))
+    resource.setrlimit(rsrc, (int(mlimit), int(mlimit)))
     return resource.getrlimit(rsrc)
 
 def verbose(func):
@@ -714,3 +759,100 @@ def filename2healpix(filenames):
     suffix = np.char.rpartition(filenames,'_')[:,-1]
     healpix = np.char.partition(suffix, '.')[:,0].astype(int)
     return healpix
+
+def ang2vec(lon, lat):
+    """Convert longitude and latitude into array of unit vectors.
+
+    Parameters
+    ----------
+    lon : longitude (deg)
+    lat : latitude (deg)
+
+    Returns
+    -------
+    vec : 2D array of vectors
+    """
+    lonr = np.deg2rad(lon)
+    latr = np.deg2rad(lat)
+    coslat = np.cos(latr)
+    return np.stack([
+        np.atleast_1d(np.cos(lonr) * coslat),
+        np.atleast_1d(np.sin(lonr) * coslat),
+        np.atleast_1d(np.sin(latr)),
+    ], axis=-1)
+
+def query_disc(nside, vec, radius, inclusive=False, fact=4, nest=False):
+    """
+    Wrapper around healpy.query_disc to deal with old healpy implementation.
+
+    nside : int
+      The nside of the Healpix map.
+    vec : float, sequence of 3 elements
+      The coordinates of unit vector defining the disk center.
+    radius : float
+      The radius (in degrees) of the disc
+    inclusive : bool, optional
+      If False, return the exact set of pixels whose pixel centers lie 
+      within the disk; if True, return all pixels that overlap with the disk,
+      and maybe a few more. Default: False
+    fact : int, optional
+      Only used when inclusive=True. The overlapping test will be done at
+      the resolution fact*nside. For NESTED ordering, fact must be a power of 2,
+      else it can be any positive integer. Default: 4.
+    nest: bool, optional
+      if True, assume NESTED pixel ordering, otherwise, RING pixel ordering
+
+    """
+    try: 
+        # New-style call (healpy 1.6.3)
+        return hp.query_disc(nside, vec, np.radians(radius), inclusive, fact, nest)
+    except Exception as e: 
+        print(e)
+        # Old-style call (healpy 0.10.2)
+        return hp.query_disc(nside, vec, np.radians(radius), nest, deg=False)
+
+def ang2disc(nside, lon, lat, radius, inclusive=False, fact=4, nest=False):
+    """
+    Wrap `healpy.query_disc` to use lon, lat, and radius in degrees.
+    """
+    vec = hp.ang2vec(lon, lat, lonlat=True)
+    return query_disc(nside, vec, radius, inclusive, fact, nest)
+
+def angsep(lon1, lat1, lon2, lat2):
+    """
+    Fast angular separation (deg) between two sky coordinates.
+    Borrowed from astropy (www.astropy.org)
+
+    Parameters
+    ----------
+    lon1, lat1 : first set of coordinates (deg)
+    lon2, lat2 : second set of coordinates (deg)
+
+    Returns
+    -------
+    sep : spherical angular separation (deg)
+
+    Notes
+    -----
+    The angular separation is calculated using the Vincenty formula [1],
+    which is slighly more complex and computationally expensive than
+    some alternatives, but is stable at at all distances, including the
+    poles and antipodes.
+
+    [1] http://en.wikipedia.org/wiki/Great-circle_distance
+    """
+    lon1,lat1 = np.radians([lon1,lat1])
+    lon2,lat2 = np.radians([lon2,lat2])
+    
+    sdlon = np.sin(lon2 - lon1)
+    cdlon = np.cos(lon2 - lon1)
+    slat1 = np.sin(lat1)
+    slat2 = np.sin(lat2)
+    clat1 = np.cos(lat1)
+    clat2 = np.cos(lat2)
+
+    num1 = clat2 * sdlon
+    num2 = clat1 * slat2 - slat1 * clat2 * cdlon
+    denominator = slat1 * slat2 + clat1 * clat2 * cdlon
+
+    return np.degrees(np.arctan2(np.hypot(num1,num2), denominator))

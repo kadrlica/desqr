@@ -33,5 +33,5 @@ if __name__ == "__main__":
 
     func = utils.add_column
     arglist = [(f,args.column,args.formula,args.force) for f in args.filenames]
-    results = utils.multiproc(func, arglist processes=args.nproc)
+    results = utils.multiproc(func, arglist, processes=args.nproc)
 

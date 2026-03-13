@@ -6,8 +6,9 @@ import time
 import glob
 
 import numpy as np
-import download
-from utils import mkdir
+
+from desqr import download
+from desqr.utils import mkdir
 
 if __name__ == "__main__":
     import argparse

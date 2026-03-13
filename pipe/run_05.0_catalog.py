@@ -11,10 +11,10 @@ import glob
 import numpy as np
 import healpy as hp
 
-from utils import is_found, mkdir
+from desqr.utils import is_found, mkdir
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser()
     args = parser.parse_args()
 
@@ -42,14 +42,15 @@ if __name__ == "__main__":
 
         minbands = config.get('minbands')
         minbands = '--min-bands %s'%minbands if minbands else ''
-
+        minepochs = config.get('minepochs')
+        minepochs = '--min-epochs %s'%minepochs if minepochs else ''
         ebv = config.get('ebv',None)
         ebv = '--ebv %s'%ebv if ebv else ''
 
         force = '-f' if args.force else ''
         bands = ' '.join(['-b %s'%b for b in config.get('bands',[])])
-        params=(' '.join(infiles),catfile,keyfile,bands,minbands,ebv,force)
-        cmd = 'catalog.py -v %s -o %s -k %s %s %s %s %s'%params
+        params=(' '.join(infiles),catfile,keyfile,bands,minbands,minepochs,ebv,force)
+        cmd = 'catalog.py -v %s -o %s -k %s %s %s %s %s %s'%params
 
         if args.queue == 'local':
             print(cmd)

@@ -20,8 +20,10 @@ except ImportError:
     from ugali.utils.mlab import rec_append_fields
 
 from ugali.utils.projector import angsep
+from ugali.utils.healpix import ang2vec
 
 from desqr.utils import set_memory_limit, insert_columns
+#from desqr.utils import angsep, ang2vec
 from desqr.const import ZEROSTR,OBJECT_ID
 from desqr.split import split_qcat
 from desqr.logger import logger
@@ -41,28 +43,6 @@ MATCHCOLS = ['RA','DEC','EXPNUM']
 ###     coords[:, 1] = y
 ###     coords[:, 2] = z
 ###     return coords
-
-
-def ang2vec(lon, lat):
-    """Convert longitude and latitude into array of unit vectors.
-
-    Parameters
-    ----------
-    lon : longitude (deg)
-    lat : latitude (deg)
-
-    Returns
-    -------
-    vec : 2D array of vectors
-    """
-    lonr = np.deg2rad(lon)
-    latr = np.deg2rad(lat)
-    coslat = np.cos(latr)
-    return np.stack([
-        np.atleast_1d(np.cos(lonr) * coslat),
-        np.atleast_1d(np.sin(lonr) * coslat),
-        np.atleast_1d(np.sin(latr)),
-    ], axis=-1)
 
 def projector(lon, lat):
     return ang2vec(lon,lat)

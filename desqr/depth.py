@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-Characterize photometric depth.
+Characterize photometric depth over the survey.
 """
-import glob
 import os,sys
-import time
 from os.path import join
+import glob
+import time
 import subprocess
 
 import matplotlib
@@ -74,7 +74,7 @@ def draw_maglim_pixel(hpxmap,**kwargs):
     nside = hp.npix2nside(len(hpxmap))
     pix = np.where(hpxmap > 0)
     if len(pix[0]) == 0:
-        logger.warn("No maglims found")
+        logger.warning("No maglims found")
         return
 
     ra,dec = hp.pix2ang(nside,pix,lonlat=True)
@@ -105,7 +105,7 @@ def draw_magerr(mag,magerr,**kwargs):
 
 def plot_depth(filename,outfile=None,survey='delve'):
     logger.info("Reading %s..."%filename)
-    hpxmap = hp.read_map(filename,verbose=False)
+    hpxmap = hp.read_map(filename)
 
     label = r'Magnitude Limit (mag)'
     cbar_kwargs = dict(label=label)
@@ -120,30 +120,49 @@ def plot_depth(filename,outfile=None,survey='delve'):
     plt.savefig(outfile,bbox_inches='tight')
 
 
-def depth_psf(infile,nside=NSIDE,snr=10.):
-    """ MAG_PSF depth with star/galaxy selection """
-    MAGS = bfields('MAG_PSF',BANDS)
-    MAGERRS = bfields('MAGERR_PSF',BANDS)
-    SPREADS = bfields('WAVG_SPREAD_MODEL',BANDS)
+def calculate_depth(filename, nside=NSIDE, snr=10.0,
+                    mag='MAG_PSF', magerr='MAGERR_PSF', spread='WAVG_SPREAD_MODEL',
+                    stargal=None):
+    """ Calculate the photometric depth with arbitrary magnitude and object selection. 
+
+    Parameters
+    ----------
+    filename : input filename
+    nside : nside of output map
+    snr : signal-to-noise of maglim
+    mag : magnitude variable prefix
+    magerr : magnitude error variable prefix
+    spread : star-galaxy classifier
+    stargal : object selection (None = none; 0 = stars; 1 = galaxies)
+    """
+    MAGS = bfields(mag,BANDS)
+    MAGERRS = bfields(magerr,BANDS)
+    SPREADS = bfields(spread,BANDS)
 
     # From propagation of errors:
     # mag = -2.5 * log10(flux)
     # magerr = -2.5/ln(10) * fluxerr/flux
     mag_snr = (2.5/np.log(10)) / (snr)
 
-    logger.info(infile)
+    logger.info(filename)
     ret = dict()
     for band,mag,magerr,spread in zip(BANDS,MAGS,MAGERRS,SPREADS):
-        data = fitsio.read(infile,columns=['RA','DEC',mag,magerr,spread])
+        columns = ['RA','DEC'] + [mag, magerr, spread]
+        data = fitsio.read(filename,columns=columns)
 
         h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
-        mag_bright_end = edges[np.argmax(h)] - 3.
+        mag_bright = edges[np.argmax(h)] - 3.
+        mag_faint = edges.max()
 
-        cut = (np.fabs(data[spread]) < 0.002) & (data[mag] > mag_bright_end) & (data[mag] < 30.)
+        cut = (data[mag] > mag_bright) & (data[mag] < mag_faint)
+        if stargal == 0:
+            cut &= (np.fabs(data[spread]) < 0.002)
+        elif stargal == 1:
+            cut &= (data[spread] > 0.003)
 
         d = data[cut]
         if len(d) < 2:
-            logger.warn("Insufficent objects in %s-band"%band)
+            logger.warning("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -154,13 +173,12 @@ def depth_psf(infile,nside=NSIDE,snr=10.):
         delta_mag = d[mag][match[1]] - d[mag][match[0]]
         delta_log_magerr = np.log10(d[magerr][match[1]]) - np.log10(d[magerr][match[0]])
 
-        old = np.seterr(divide='ignore',invalid='ignore')
-        ratio = delta_log_magerr / delta_mag
-        cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
-        np.seterr(**old)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = delta_log_magerr / delta_mag
+            cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
 
         if cut_nan_inf.sum() < 2:
-            logger.warn("Insufficent objects in %s-band"%band)
+            logger.warning("Insufficent objects in %s-band"%band)
             ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
@@ -175,64 +193,28 @@ def depth_psf(infile,nside=NSIDE,snr=10.):
         hpx = np.unique(pix)
         maglim = nd.median(maglims,labels=pix,index=hpx)
         ret[band] = [hpx,maglim]
-    return ret
-
-def depth_auto(infile,nside=NSIDE,snr=10.):
-    """ MAG_AUTO depth without star/galaxy selection """
-
-    MAGS = bfields('MAG_AUTO',BANDS)
-    MAGERRS = bfields('MAGERR_AUTO',BANDS)
-
-    # From propagation of errors:
-    # mag = -2.5 * log10(flux)
-    # magerr = -2.5/ln(10) * fluxerr/flux
-    mag_snr = (2.5/np.log(10)) / (snr)
-
-    logger.info(infile)
-    ret = dict()
-    for band,mag,magerr in zip(BANDS,MAGS,MAGERRS):
-        data = fitsio.read(infile,columns=['RA','DEC',mag,magerr])
-
-        h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
-        mag_bright_end = edges[np.argmax(h)] - 3.
-
-        cut = (data[mag] > mag_bright_end) & (data[mag] < 30.)
-
-        d = data[cut]
-        if len(d) < 2:
-            logger.warn("Insufficent objects in %s-band"%band)
-            ret[band] = [np.array([],dtype=int),np.array([])]            
-            continue
-
-        pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
-
-        match = ugali.utils.projector.match(d['RA'],d['DEC'],d['RA'],d['DEC'],nnearest=2)
-
-        delta_mag = d[mag][match[1]] - d[mag][match[0]]
-        delta_log_magerr = np.log10(d[magerr][match[1]]) - np.log10(d[magerr][match[0]])
-
-        old = np.seterr(divide='ignore',invalid='ignore')
-        ratio = delta_log_magerr / delta_mag
-        cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
-        np.seterr(**old)
-
-        if cut_nan_inf.sum() < 2:
-            logger.warn("Insufficent objects in %s-band"%band)
-            ret[band] = [np.array([],dtype=int),np.array([])]            
-            continue
-
-        kde = scipy.stats.gaussian_kde(ratio[cut_nan_inf])
-
-        values = np.linspace(0., 1., 1000)
-        kde_values = kde.evaluate(values)
-        slope = values[np.argmax(kde_values)]
         
-        maglims = d[mag] - ((np.log10(d[magerr]) - np.log10(mag_snr)) / slope)
-
-        hpx = np.unique(pix)
-        maglim = nd.median(maglims,labels=pix,index=hpx)
-        ret[band] = [hpx,maglim]
     return ret
+
+def depth_psf(filename, nside=NSIDE, snr=10.0):
+    return calculate_depth(filename, nside, snr,
+                           mag='MAG_PSF', magerr='MAGERR_PSF', spread='WAVG_SPREAD_MODEL',
+                           stargal=0)
+
+def depth_auto(filename, nside=NSIDE, snr=10.0):
+    return calculate_depth(filename, nside, snr,
+                           mag='MAG_AUTO', magerr='MAGERR_AUTO', spread='WAVG_SPREAD_MODEL',
+                           stargal=None)
+
+def depth_psf_mag(filename, nside=NSIDE, snr=10.0):
+    return calculate_depth(filename, nside, snr,
+                           mag='PSF_MAG_APER_8', magerr='PSF_MAG_ERR_APER_8', spread='SPREAD_MODEL',
+                           stargal=0)
+
+def depth_bdf_mag(filename, nside=NSIDE, snr=10.0):
+    return calculate_depth(filename, nside, snr,
+                           mag='BDF_MAG', magerr='BDF_MAG', spread='SPREAD_MODEL',
+                           stargal=None)
 
 
 def teff(infile,nside=NSIDE,mode='median'):
@@ -245,9 +227,9 @@ def teff(infile,nside=NSIDE,mode='median'):
         pix = hp.ang2pix(nside,data['RA'],data['DEC'],lonlat=True)
         hpx = np.unique(pix)        
 
-        if mode.lower() is 'median':
+        if mode.lower() == 'median':
             teff_value = nd.median(data[teff],labels=pix,index=hpx)
-        elif mode.lower() is 'mean':
+        elif mode.lower() == 'mean':
             teff_value = nd.mean(data[teff],labels=pix,index=hpx)
         else:
             msg = 'Unrecognized mode: %s'%mode
@@ -261,32 +243,44 @@ if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',help='configuration file')
-    parser.add_argument('-n','--nside',default=NSIDE,type=int)
-    parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('--type',default='psf',choices=['psf','auto'])
-    parser.add_argument('--snr',default=10,type=float)
+    parser.add_argument('configfile',help='config file')
+    parser.add_argument('-n','--nside',default=NSIDE,type=int,
+                        help='output nside')
+    parser.add_argument('-v','--verbose',action='store_true',
+                        help='output verbosity')
+    parser.add_argument('--type',default='psf',
+                        choices=['psf','auto','psf_mag','bdf_mag'],
+                        help='which mag to use')
+    parser.add_argument('--snr',default=10,type=float,
+                        help='which snr to calculate')
+    parser.add_argument('--nproc',default=4,type=int)
     args = parser.parse_args()
 
     if args.verbose: logger.setLevel(logger.INFO)
     
-    config = yaml.load(open(args.config))
+    config = yaml.safe_load(open(args.configfile))
     BANDS = config['bands']
     NSIDE = args.nside
     survey = config.get('survey')
     outdir = mkdir('release/depth')
 
-    filenames = sorted(glob.glob('cat/cat_hpx_*.fits'))
+    filenames = sorted(glob.glob(config['catdir'] + '/*_*.fits'))
+    #filenames = filenames[:100]
     arglist = list(zip(filenames,))
     kwargs = dict(nside=args.nside,snr=args.snr)
 
-    if args.type == 'psf': 
+    if args.type == 'psf':
         func = depth_psf
     elif args.type == 'auto': 
         func = depth_auto
+    elif args.type == 'psf_mag':
+        func = depth_psf_mag
+    elif args.type == 'bdf_mag': 
+        func = depth_bdf_mag
+
     else: raise Exception('Unrecognized magnitude: %s'%args.type)
 
-    out = utils.multiproc(func,arglist,kwargs)
+    out = utils.multiproc(func,arglist,kwargs,processes=args.nproc)
 
     basename = 'maglim_%s_%isig'%(args.type,args.snr)
     hpxmaps = dict()
@@ -299,11 +293,131 @@ if __name__ == "__main__":
 
         outfile = join(outdir,basename+'_%s_n%i.fits.gz'%(b,NSIDE))
         logger.info("Writing %s..."%outfile)
-        hp.write_map(outfile,hpxmap)
+        hp.write_map(outfile,hpxmap,overwrite=True)
 
     for b in BANDS:
         outfile = join(outdir,basename+'_%s_n%i.fits.gz'%(b,NSIDE))
         logger.info("Plotting %s..."%outfile)
         pngfile = outfile.replace('.fits.gz','.png')
         plot_depth(outfile,pngfile,survey=survey)
+
+
+
+###def depth_psf(infile,nside=NSIDE,snr=10.):
+###    """ MAG_PSF depth with star/galaxy selection """
+###    #MAGS = bfields('MAG_PSF',BANDS)
+###    #MAGERRS = bfields('MAGERR_PSF',BANDS)
+###    #SPREADS = bfields('WAVG_SPREAD_MODEL',BANDS)
+###    MAGS = bfields('WAVG_MAG_PSF',BANDS)
+###    MAGERRS = bfields('WAVG_MAGERR_PSF',BANDS)
+###    SPREADS = bfields('WAVG_SPREAD_MODEL',BANDS)
+### 
+###    # From propagation of errors:
+###    # mag = -2.5 * log10(flux)
+###    # magerr = -2.5/ln(10) * fluxerr/flux
+###    mag_snr = (2.5/np.log(10)) / (snr)
+### 
+###    logger.info(infile)
+###    ret = dict()
+###    for band,mag,magerr,spread in zip(BANDS,MAGS,MAGERRS,SPREADS):
+###        data = fitsio.read(infile,columns=['RA','DEC',mag,magerr,spread])
+### 
+###        h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
+###        mag_bright_end = edges[np.argmax(h)] - 3.
+### 
+###        cut = (np.fabs(data[spread]) < 0.002) & (data[mag] > mag_bright_end) & (data[mag] < 30.)
+### 
+###        d = data[cut]
+###        if len(d) < 2:
+###            logger.warning("Insufficent objects in %s-band"%band)
+###            ret[band] = [np.array([],dtype=int),np.array([])]            
+###            continue
+### 
+###        pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
+### 
+###        match = ugali.utils.projector.match(d['RA'],d['DEC'],d['RA'],d['DEC'],nnearest=2)
+### 
+###        delta_mag = d[mag][match[1]] - d[mag][match[0]]
+###        delta_log_magerr = np.log10(d[magerr][match[1]]) - np.log10(d[magerr][match[0]])
+### 
+###        old = np.seterr(divide='ignore',invalid='ignore')
+###        ratio = delta_log_magerr / delta_mag
+###        cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
+###        np.seterr(**old)
+### 
+###        if cut_nan_inf.sum() < 2:
+###            logger.warning("Insufficent objects in %s-band"%band)
+###            ret[band] = [np.array([],dtype=int),np.array([])]            
+###            continue
+### 
+###        kde = scipy.stats.gaussian_kde(ratio[cut_nan_inf])
+### 
+###        values = np.linspace(0., 1., 1000)
+###        kde_values = kde.evaluate(values)
+###        slope = values[np.argmax(kde_values)]
+###        
+###        maglims = d[mag] - ((np.log10(d[magerr]) - np.log10(mag_snr)) / slope)
+### 
+###        hpx = np.unique(pix)
+###        maglim = nd.median(maglims,labels=pix,index=hpx)
+###        ret[band] = [hpx,maglim]
+###    return ret
+### 
+###def depth_auto(infile,nside=NSIDE,snr=10.):
+###    """ MAG_AUTO depth without star/galaxy selection """
+### 
+###    MAGS = bfields('MAG_AUTO',BANDS)
+###    MAGERRS = bfields('MAGERR_AUTO',BANDS)
+### 
+###    # From propagation of errors:
+###    # mag = -2.5 * log10(flux)
+###    # magerr = -2.5/ln(10) * fluxerr/flux
+###    mag_snr = (2.5/np.log(10)) / (snr)
+### 
+###    logger.info(infile)
+###    ret = dict()
+###    for band,mag,magerr in zip(BANDS,MAGS,MAGERRS):
+###        data = fitsio.read(infile,columns=['RA','DEC',mag,magerr])
+### 
+###        h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
+###        mag_bright = edges[np.argmax(h)] - 3.
+###        mag_faint = edges.max()
+###        
+###        cut = (data[mag] > mag_bright) & (data[mag] < mag_faint)
+### 
+###        d = data[cut]
+###        if len(d) < 2:
+###            logger.warning("Insufficent objects in %s-band"%band)
+###            ret[band] = [np.array([],dtype=int),np.array([])]            
+###            continue
+### 
+###        pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
+### 
+###        match = ugali.utils.projector.match(d['RA'],d['DEC'],d['RA'],d['DEC'],nnearest=2)
+### 
+###        delta_mag = d[mag][match[1]] - d[mag][match[0]]
+###        delta_log_magerr = np.log10(d[magerr][match[1]]) - np.log10(d[magerr][match[0]])
+### 
+###        old = np.seterr(divide='ignore',invalid='ignore')
+###        ratio = delta_log_magerr / delta_mag
+###        cut_nan_inf = np.isfinite(ratio) & (delta_mag > 0.5)
+###        np.seterr(**old)
+### 
+###        if cut_nan_inf.sum() < 2:
+###            logger.warning("Insufficent objects in %s-band"%band)
+###            ret[band] = [np.array([],dtype=int),np.array([])]            
+###            continue
+### 
+###        kde = scipy.stats.gaussian_kde(ratio[cut_nan_inf])
+### 
+###        values = np.linspace(0., 1., 1000)
+###        kde_values = kde.evaluate(values)
+###        slope = values[np.argmax(kde_values)]
+###        
+###        maglims = d[mag] - ((np.log10(d[magerr]) - np.log10(mag_snr)) / slope)
+### 
+###        hpx = np.unique(pix)
+###        maglim = nd.median(maglims,labels=pix,index=hpx)
+###        ret[band] = [hpx,maglim]
+###    return ret
 

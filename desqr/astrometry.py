@@ -5,8 +5,8 @@ Characterize astrometric scatter.
 import glob
 import os
 from os.path import join
-import logging
 from collections import OrderedDict as odict
+import datetime
 
 import yaml
 import matplotlib
@@ -16,21 +16,20 @@ import pylab as plt
 
 import numpy as np
 import scipy.ndimage as nd
+import pandas as pd
 import healpy as hp
 import fitsio
 
-import ugali.utils.projector
-from ugali.utils.projector import angsep
-
-import utils
-import plotting
-from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
-from utils import bfields, load_infiles, get_vizier_catalog, get_local_catalog
-from utils import mkdir, blank, mr_nice_guy
-from match import match_query
+from desqr import utils
+from desqr import plotting
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
+from desqr.utils import bfields, load_infiles, get_vizier_catalog, get_local_catalog
+from desqr.utils import mkdir, blank, mr_nice_guy, angsep
+from desqr.match import match_query
+from desqr.logger import logger
 
 COLUMNS = [OBJECT_ID,'RA','DEC']
-TYPES = ['internal','hpxrms','gaia_dr1','gaia_dr2','gaia_edr3']
+TYPES = ['internal','hpxrms','gaia_dr1','gaia_dr2','gaia_edr3','gaia_dr3']
 
 # Catalogs to be accessed from Vizier
 VIZIER = odict([
@@ -119,7 +118,7 @@ def plot_astrometry(filename,outfile=None,survey='delve'):
     label = r'Median Angular Separation (mas)'
     cbar_kwargs = dict(label=label)
     hpxmap_kwargs = dict(xsize=1000)
-    hist_kwargs = dict(bins=np.linspace(1,100,51))
+    hist_kwargs = dict(bins=np.linspace(1,60,31))
     fig,axes,smap = plotting.plot_hpxmap_hist(hpxmap,survey,cbar_kwargs,hpxmap_kwargs,hist_kwargs)
     axes[1].set_xlabel(label)
 
@@ -300,6 +299,122 @@ def internal_astrometry(catfile,nside=128,band='r',plot=False):
 
     return upix,peak
 
+def astrometry_stats_row(row, snr=100, source='gaia_dr3'):
+    """ Calculate astrometry stats relative to reference catalog.
+
+    Parameters
+    ----------
+    row : input information
+    snr : signal-to-noise threshold
+    source : reference catalog source
+
+    Returns
+    -------
+    stats     : astrometry statistics
+    """
+    columns = ['EXPNUM', 'CCDNUM', 'BAND', 'RA','DEC',
+               'ALPHAWIN_J2000', 'DELTAWIN_J2000',
+               'FLUX_AUTO', 'FLUXERR_AUTO',
+               'SPREAD_MODEL', 'SPREADERR_MODEL'
+               ]
+
+    filepath = row.path
+    ra  = row.ra
+    dec = row.dec
+    
+    logger.info("Reading object catalog...")
+    logger.debug('  '+str(datetime.datetime.now()))
+
+    catalog = fitsio.read(filepath, columns=columns)
+    return astrometry_stats(catalog, (ra,dec), snr, source)
+    
+def astrometry_stats(catalog, centroid, snr=100, source='gaia_dr3'):
+    """ Calculate astrometry stats relative to reference catalog.
+
+    Parameters
+    ----------
+    catalog : input information
+    centroid : the boresight guess
+    snr : signal-to-noise threshold
+    source : reference catalog source
+
+    Returns
+    -------
+    stats     : astrometry statistics
+    """
+    # Which RA, DEC values to use
+    #ra_col, dec_col = 'RA', 'DEC'
+    ra_col, dec_col = 'ALPHAWIN_J2000', 'DELTAWIN_J2000'
+
+    ra,dec = centroid
+    sel  = catalog['FLUX_AUTO'] / catalog['FLUXERR_AUTO'] > snr
+    sel &= np.abs(catalog['SPREAD_MODEL']) < 0.003
+    cat = catalog[sel] 
+    logger.debug('  '+str(datetime.datetime.now()))
+    logger.info("  %s objects"%len(cat))
+
+    refang = 1.2 # config param: reference catalog angular selection (deg)
+    logger.info("Reading reference catalog...")
+    logger.debug('  '+str(datetime.datetime.now()))
+    ext = get_local_catalog(ra, dec, refang, source)
+    logger.info("  %s objects"%len(ext))
+
+    idx1, idx2, sep = match_query(cat[ra_col],cat[dec_col],ext['RA'],ext['DEC'])
+
+    # Use a fairly wide matching radius (2 arcsec)
+    cut = 2.0
+    sel = sep*3600. < cut
+    deg2mas = 3600 * 1000
+
+    logger.info("  %s matched objects"%sel.sum())
+
+    cat_match = pd.DataFrame(cat[idx1[sel]].byteswap().newbyteorder())
+    ext_match = pd.DataFrame(ext[idx2[sel]])
+    ext_match = ext_match.add_suffix('_EXT')
+
+    df = pd.concat([cat_match, ext_match], axis=1)
+    df['DRA'] = (df[ra_col] - df['RA_EXT']) * deg2mas
+    df['DRACOSDEC'] = df['DRA'] * np.cos(np.radians(df['DEC']))
+    df['DDEC'] = (df[dec_col] - df['DEC_EXT']) * deg2mas
+    df['SEP'] = sep[sel]*deg2mas
+
+    expnum = np.unique(df['EXPNUM'])[0]
+    ccdnums = np.unique(df['CCDNUM'])
+    band = np.unique(df['BAND'])[0]
+    grp = df.groupby('CCDNUM')
+    stats = pd.DataFrame({
+        'EXPNUM': expnum,
+        'CCDNUM': ccdnums,
+        'BAND': band,
+        'SEP_MEAN': grp['SEP'].mean().values,
+        'SEP_MEDIAN': grp['SEP'].median().values,
+        'SEP_STD': grp['SEP'].std().values,
+        'SEP_Q05': grp['SEP'].quantile(0.05).values,
+        'SEP_Q95': grp['SEP'].quantile(0.95).values,
+        'DRACOSDEC_MEDIAN': grp['DRACOSDEC'].median().values,
+        'DDEC_MEDIAN': grp['DDEC'].median().values,
+        'COUNT': grp['CCDNUM'].count().values,
+    })
+
+    # Add overall statistics
+    summary = pd.DataFrame({
+        'EXPNUM': [expnum],
+        'CCDNUM': -1,
+        'BAND': band,
+        'SEP_MEAN': df['SEP'].mean(),
+        'SEP_MEDIAN': df['SEP'].median(),
+        'SEP_STD': df['SEP'].std(),
+        'SEP_Q05': df['SEP'].quantile(0.05),
+        'SEP_Q95': df['SEP'].quantile(0.95),
+        'DRACOSDEC_MEDIAN': df['DRACOSDEC'].median(),
+        'DDEC_MEDIAN': df['DDEC'].median(),
+        'COUNT': len(df),
+    })
+    stats = pd.concat([stats, summary])
+
+    return stats
+
+
 if __name__ == "__main__":
     import argparse
     description = __doc__
@@ -314,7 +429,7 @@ if __name__ == "__main__":
     parser.add_argument('--nproc',default=4,type=int)
     args = parser.parse_args()
 
-    if args.verbose: logging.getLogger().setLevel(logging.DEBUG)
+    if args.verbose: logger.setLevel(logger.DEBUG)
     print("Calculating astrometric offsets ...")
     band = args.band
 
@@ -387,7 +502,7 @@ if __name__ == "__main__":
     q = [5,50,95]
     p = np.percentile(hpxmap.compressed(),q)
     print("Global Astrometric Percentiles:")
-    print('%s (%s%%)'%(p,q))
+    utils.print_statistics(hpxmap*1000)
 
     print("Plotting %s..."%outfile)
     pngfile = outfile.replace('.fits.gz','.png')

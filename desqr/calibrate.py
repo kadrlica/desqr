@@ -1,13 +1,11 @@
 #!/usr/bin/env python
-"""
-Derive photometric zeropoints.
+"""Derive photometric zeropoints.
 
 Derived from Douglas Tucker's DELVE_tie_to_refcat2.py
 """
 __author__ = "Alex Drlica-Wagner"
 
 import os, sys
-import logging
 import subprocess
 import glob
 import datetime
@@ -20,13 +18,12 @@ import fitsio
 from astropy.stats import sigma_clip
 from scipy import interpolate
 
-from utils import mkdir
-from const import BANDS, TAGS
-import downskim
-import match
-import utils
-
-from ugali.utils.healpix import ang2disc
+from desqr import downskim
+from desqr import match
+from desqr import utils
+from desqr.utils import mkdir, ang2disc
+from desqr.const import BANDS, TAGS
+from desqr.logger import logger
 
 SURVEYS = ['refcat2','desdr2']
 #UID     = 'FILENAME'
@@ -54,9 +51,10 @@ DESDR2_MAPPING = odict([
 ])
 DESDR2_COLUMNS = list(DESDR2_MAPPING.keys())
 
-# https://archive.stsci.edu/prepds/atlas-refcat2/
-PS1_CONTRIB_BIT = 2**1
-SKY_CONTRIB_BIT = 2**2
+# Appendix A of https://arxiv.org/pdf/1809.09157
+# (Note that STScI documentation is confusing/wrong)
+PS1_CONTRIB_BIT = 2**2
+SKY_CONTRIB_BIT = 2**3
 REFCAT2_SPLIT_DEC = -30 # Declination split (deg)
 
 INTERP_DIR = '/home/s1/kadrlica/projects/delve/calib/v4/interp'
@@ -225,44 +223,44 @@ def linear_to_des(dataFrame, band, coeff, colnames):
     dataFrame : input DataFrame with new column added.
     mask      : mask for useable rows
     """
-    logging.info("Performing linear transformation from reference catalog to DECam...")
+    logger.info("Performing linear transformation from reference catalog to DECam...")
 
     # Output column names
     magStdColName,magerrStdColName = colnames
     # Transformation coefficients
     A = coeff
 
-    logging.debug("Band: %s"%band)
+    logger.debug("Band: %s"%band)
 
-    if band is 'g':
+    if band == 'g':
         # g_des = g_ps + 0.0994*(g-r)_ps - 0.0076    [-0.2 < (g-r)_ps <= 1.2]
         dataFrame[magStdColName] = dataFrame['G']+\
             A[band][0]*(dataFrame['G']-dataFrame['R'])+A[band][1]
         dataFrame[magerrStdColName] = dataFrame['DG']  # temporary
         mask  = ( (dataFrame['G']-dataFrame['R']) > -0.2)
         mask &= ( (dataFrame['G']-dataFrame['R']) <= 1.2)
-    elif band is 'r':
+    elif band == 'r':
         # r_des = r_ps - 0.1335*(g-r)_ps + 0.0189    [-0.2 < (g-r)_ps <= 1.2]
         dataFrame[magStdColName] = dataFrame['R']+\
             A[band][0]*(dataFrame['G']-dataFrame['R'])+A[band][1]
         dataFrame[magerrStdColName] = dataFrame['DR']  # temporary
         mask  = ( (dataFrame['G']-dataFrame['R']) > -0.2)
         mask &= ( (dataFrame['G']-dataFrame['R']) <= 1.2)
-    elif band is 'i':
+    elif band == 'i':
         # i_des = i_ps - 0.3407*(i-z)_ps + 0.0026    [-0.2 < (i-z)_ps <= 0.3]
         dataFrame[magStdColName] = dataFrame['I']+\
             A[band][0]*(dataFrame['I']-dataFrame['Z'])+A[band][1]
         dataFrame[magerrStdColName] = dataFrame['DI']  # temporary
         mask  = ( (dataFrame['I']-dataFrame['Z']) > -0.2)
         mask &= ( (dataFrame['I']-dataFrame['Z']) <= 0.3)
-    elif band is 'z':
+    elif band == 'z':
         # z_des = z_ps - 0.2575*(i-z)_ps - 0.0074    [-0.2 < (i-z)_ps <= 0.3]
         dataFrame[magStdColName] = dataFrame['Z']+\
             A[band][0]*(dataFrame['I']-dataFrame['Z'])+A[band][1]
         dataFrame[magerrStdColName] = dataFrame['DZ']  # temporary
         mask  = ( (dataFrame['I']-dataFrame['Z']) > -0.2)
         mask &= ( (dataFrame['I']-dataFrame['Z']) <= 0.3)
-    elif band is 'Y':
+    elif band == 'Y':
         # Y_des = z_ps - 0.6032*(i-z)_ps + 0.0185    [-0.2 < (i-z)_ps <= 0.3]
         dataFrame[magStdColName] = dataFrame['Z']+\
             A[band][0]*(dataFrame['I']-dataFrame['Z'])+A[band][1]
@@ -288,16 +286,16 @@ def interp_to_des(dataFrame, band, interps, colnames):
     dataFrame : input DataFrame with new column added.
     mask      : mask for useable rows
     """
-    logging.info("Performing interpolation transformation from reference catalog to DECam...")
+    logger.info("Performing interpolation transformation from reference catalog to DECam...")
 
     # Output column names
     magStdColName,magerrStdColName = colnames
 
     if band in ['g','r']: 
-        logging.info("Interpolating in (g-r) color...")
+        logger.info("Interpolating in (g-r) color...")
         color = dataFrame['G']-dataFrame['R']
     else:                 
-        logging.info("Interpolating in (i-z) color...")
+        logger.info("Interpolating in (i-z) color...")
         color = dataFrame['I']-dataFrame['Z']
 
     # Offset to go from reference to DECam
@@ -311,7 +309,7 @@ def interp_to_des(dataFrame, band, interps, colnames):
     if north_sel.sum():
         filename=os.path.join('interp',interps[band][0][0])
         shift = interps[band][0][1]/1000. #mmag
-        logging.info("North: %s"%filename)
+        logger.info("North: %s"%filename)
         df_interp_north = pd.read_csv(filename)  
         interp_north = interpolate.interp1d(df_interp_north.bin_label.values.astype(float),
                                             df_interp_north.bin_median.values, **kwargs)
@@ -322,30 +320,30 @@ def interp_to_des(dataFrame, band, interps, colnames):
     if south_sel.sum():
         filename=os.path.join('interp',interps[band][1][0])
         shift = interps[band][1][1]/1000. #mmag
-        logging.info("South: %s"%filename)
+        logger.info("South: %s"%filename)
         df_interp_south = pd.read_csv(filename)  
         interp_south = interpolate.interp1d(df_interp_south.bin_label.values.astype(float),
                                             df_interp_south.bin_median.values, **kwargs)
         offset[south_sel] = interp_south(color)[south_sel] + shift
 
     # Calculate the magnitude
-    if band is 'g':
+    if band == 'g':
         # Create linear interpolation of the median dmag vs. color bin calculated above...
         dataFrame[magStdColName] = dataFrame['G'] + offset
         dataFrame[magerrStdColName] = dataFrame['DG']  # temporary
         mask  = ( color > -0.2)
         mask &= ( color <= 1.0)
-    elif band is 'r':
+    elif band == 'r':
         dataFrame[magStdColName] = dataFrame['R'] + offset
         dataFrame[magerrStdColName] = dataFrame['DR']  # temporary
         mask  = ( color > -0.2)
         mask &= ( color <= 1.0)
-    elif band is 'i':
+    elif band == 'i':
         dataFrame[magStdColName] = dataFrame['I'] + offset
         dataFrame[magerrStdColName] = dataFrame['DI']  # temporary
         mask  = ( color > -0.2)
         mask &= ( color <= 0.3)
-    elif band is 'z':
+    elif band == 'z':
         dataFrame[magStdColName] = dataFrame['Z'] + offset
         dataFrame[magerrStdColName] = dataFrame['DZ']  # temporary
         mask  = ( color > -0.2)
@@ -357,8 +355,8 @@ def interp_to_des(dataFrame, band, interps, colnames):
     return dataFrame, mask
 
 def compare_methods(dataFrame,band):
-    logging.info("Comparing transform methods...")
-    logging.debug(datetime.datetime.now())
+    logger.info("Comparing transform methods...")
+    logger.debug(datetime.datetime.now())
 
     magStdColName = '%s_des'%band
     magerrStdColName = '%serr_des'%band    
@@ -398,8 +396,8 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     else: 
         raise Exception('Unrecognized survey: %s'%survey)        
 
-    logging.info("Starting to derive zeropoints...")
-    logging.debug(datetime.datetime.now())
+    logger.info("Starting to derive zeropoints...")
+    logger.debug(datetime.datetime.now())
 
     fluxObsColName    = FLUX
     fluxerrObsColName = FLUXERR
@@ -452,8 +450,8 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     mask2 = ( (df['MAG_DIFF'] > magDiffMin) & (df['MAG_DIFF'] < magDiffMax) )
     mask = mask1 & mask2
 
-    logging.info("Masking %s objects."%(~mask).sum())
-    logging.info("%s objects remain."%mask.sum())
+    logger.info("Masking %s objects."%(~mask).sum())
+    logger.info("%s objects remain."%mask.sum())
 
     if mask.sum() == 0:
         msg = "No unmasked objects!"
@@ -466,10 +464,10 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
     # Iterate over the copy of dataFrame 3 times, removing outliers...
     #  We are using "Method 2/Group by item" from
     #  http://nbviewer.jupyter.org/urls/bitbucket.org/hrojas/learn-pandas/raw/master/lessons/07%20-%20Lesson.ipynb
-    logging.info("Sigma-clipping...")
+    logger.info("Sigma-clipping...")
     nsig = 3.0
     for niter in range(3):
-        logging.info("   iteration: %d..." %niter)
+        logger.info("   iteration: %d..." %niter)
 
         # make a copy of original df, and then delete the old one...
         newdf = df[mask].copy()
@@ -483,13 +481,13 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
         del grpnewdf
 
         nrows = newdf['MAG_DIFF'].size
-        logging.info("  Number of rows remaining:  %d"%nrows)
+        logger.info("  Number of rows remaining:  %d"%nrows)
 
         df = newdf
         mask = ( df['Outlier'] == False )
 
     # Perform pandas grouping/aggregating functions on sigma-clipped Data Frame...
-    logging.info('Performing grouping/aggregating...')
+    logger.info('Performing grouping/aggregating...')
     # These are unique columns (save space with float32)
     columns = ['EXPNUM','CCDNUM','BAND','EXPTIME']
     if 'FILENAME' in df.columns: columns.append('FILENAME')
@@ -513,10 +511,10 @@ def derive_zeropoints(dataFrame, band, survey='refcat2', transform='linear'):
                        magZeroErr, magZeroNum])
     newDataFrame = pd.concat(seriesList, join='outer', axis=1 )
 
-    logging.debug(datetime.datetime.now())
+    logger.debug(datetime.datetime.now())
     return newDataFrame
 
-def read_refcat(ra,dec,radius=1.5):
+def read_refcat(ra, dec, radius=1.5, contrib=None):
     """ Read the reference catalog in a localized region.
 
     Parameters
@@ -524,6 +522,7 @@ def read_refcat(ra,dec,radius=1.5):
     ra : ra (deg)
     dec : dec (deg)
     radius : regional radius (deg)
+    contrib : refcat contribution bit
 
     Returns
     -------
@@ -542,10 +541,13 @@ def read_refcat(ra,dec,radius=1.5):
     sel = np.in1d(refcat['DUPVAR'],[0,2]) # constant/unknown and non-duplicate
     for band in ['G','R','I','Z']:
         sel &= (refcat[band+'CHI'] <= 10)
-        sel &= (refcat[band+'CONTRIB'] & (PS1_CONTRIB_BIT | SKY_CONTRIB_BIT) > 0)
+        if contrib is not None:
+            # For example, the contrib bit can be:
+            #contrib = (PS1_CONTRIB_BIT | SKY_CONTRIB_BIT)
+            sel &= ( (refcat[band+'CONTRIB'] & contrib) > 0)
 
     # Refcat2 SNR cuts
-    SNR_NORTH = 30.
+    SNR_NORTH = 20.
     MAGERR_NORTH = snr_to_magerr(SNR_NORTH)
 
     SNR_SOUTH = 20.
@@ -623,6 +625,29 @@ def merge_refcat(catalog,refcat,angsep=1.0):
     # Return the merged data frame (note that columns will be duplicated)
     return pd.concat([df1,df2],axis=1)
 
+def read_catalogs(filenames, select=None):
+    """Read the object catalog from filenames or downskim.
+
+    Parameters
+    ----------
+    filenames : catalog file names
+    select : selection criteria for downskim
+
+    Returns
+    -------
+    catalog : catalog recarray
+    """
+    logger.info("Reading object catalog...")
+    logger.debug(filenames)
+    logger.debug('  '+str(datetime.datetime.now()))
+    if select is not None:
+        catalog = downskim.create_downskim(filenames,select,exp=exp,dtype=DTYPES)
+    else:
+        catalog = np.concatenate([fitsio.read(f) for f in filenames])
+    logger.debug('  '+str(datetime.datetime.now()))
+    logger.info("  %s objects"%len(catalog))
+    return catalog
+
 def calibrate(outfile,select,exp,survey,force,transform='linear'):
     """ The calibration driver function.
 
@@ -646,30 +671,25 @@ def calibrate(outfile,select,exp,survey,force,transform='linear'):
     path = None if 'path' not in exp.dtype.names else exp['path']
     filenames = downskim.get_filenames(expnum,path)
 
-    logging.info("Reading object catalog...")
-    logging.debug('  '+str(datetime.datetime.now()))
-    catalog = downskim.create_downskim(filenames,select,exp=exp,dtype=DTYPES)
-    logging.debug('  '+str(datetime.datetime.now()))
-    logging.info("  %s objects"%len(catalog))
+    catalog = read_catalogs(filenames, select)
 
-
-    logging.info("Reading reference catalog...")
+    logger.info("Reading reference catalog...")
     refang = 1.2 # config param: reference catalog angular selection (deg)
 
-    logging.debug('  '+str(datetime.datetime.now()))
+    logger.debug('  '+str(datetime.datetime.now()))
     if survey == 'refcat2': 
-        refcat = read_refcat(exp['telra'],exp['teldec'],refang)
+        refcat = read_refcat(exp['ra'],exp['dec'],refang)
     elif survey == 'desdr2':
-        refcat = read_desdr2(exp['telra'],exp['teldec'],refang)
+        refcat = read_desdr2(exp['ra'],exp['dec'],refang)
     else:
         raise Exception('Unrecognized survey: %s'%survey)
-    logging.debug('  '+str(datetime.datetime.now()))
-    logging.info("  %s objects"%len(refcat))
+    logger.debug('  '+str(datetime.datetime.now()))
+    logger.info("  %s objects"%len(refcat))
 
-    logging.info("Matching with reference catalog...")
+    logger.info("Matching with reference catalog...")
     angsep = 0.5 # config param: angular separation for matching (arcsec)
     dataFrame = merge_refcat(catalog,refcat,angsep)
-    logging.info("  %s objects"%len(dataFrame))
+    logger.info("  %s objects"%len(dataFrame))
 
     # For debugging...
     if False:
@@ -677,16 +697,19 @@ def calibrate(outfile,select,exp,survey,force,transform='linear'):
         fname = fname.replace('.fits','.csv')
         dataFrame.to_csv(fname, index=False)
 
-    logging.info("Deriving zeropoints...")
+    logger.info("Deriving zeropoints...")
     output = derive_zeropoints(dataFrame,exp['band'],survey=survey, 
                                transform=transform)
 
-    logging.info("Writing %s..."%outfile)
+    logger.info("Writing %s..."%outfile)
     ext = os.path.splitext(outfile)[-1]
 
     if ext in ('.fits','.fits.gz'):
-        dirname = os.path.dirname(filenames[0])
-        header = [dict(name='PATH',value=dirname,comment='original path'),
+        if len(filenames) == 1:
+            pathname = filenames[0]
+        else:
+            pathname = os.path.dirname(filenames[0])
+        header = [dict(name='PATH',value=pathname,comment='original path'),
                   dict(name='SURVEY',value=survey,comment='reference catalog')]
         fitsio.write(outfile, output.to_records(), header=header, clobber=True)
     else:
@@ -714,29 +737,21 @@ if __name__ == "__main__":
                         help='type of transformation')
     args = parser.parse_args()
 
-    level = logging.DEBUG if args.verbose else logging.INFO
-    logging.getLogger().setLevel(level)
+    logger.setLevel(logger.INFO)
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
-    explist = pd.read_csv(args.explist).to_records(index=False)
-    explist.dtype.names = [str(n).lower() for n in explist.dtype.names]
+    explist = pd.read_csv(args.explist, comment='#')
+    explist.columns = explist.columns.str.lower()
+    explist.rename(columns={'telra': 'ra', 'teldec': 'dec'}, inplace=True)
+    explist = explist.to_records(index=False)
     explist['band'] = np.char.lower(explist['band'].astype(str))
-
-    #exp = explist[explist['EXPNUM'] == args.expnum]
-    #if len(exp) == 0:
-    #    raise ValueError("EXPNUM not found: %s"%args.expnum)
-    #elif len(exp) > 1:
-    #    msg = "Multiple values for EXPNUM found: %s"%args.expnum
-    #    for e in exp: msg += ("\n"+e)
-    #    raise ValueError(msg)
-    #exp = exp[0]
-
     explist = explist[np.in1d(explist['expnum'], args.expnum)]
     if len(explist) == 0:
         raise ValueError("EXPNUM not found: %s"%args.expnum)
 
     status = 0
     for i,exp in enumerate(explist):
-        logging.info("(%s/%s): %s "%(i+1,len(explist),exp['expnum']))
+        logger.info("(%s/%s): %s "%(i+1,len(explist),exp['expnum']))
 
         TAG = exp['tag'] if args.tag is None else args.tag
 
@@ -747,15 +762,18 @@ if __name__ == "__main__":
         elif TAG.startswith("DELVE"):
             select = downskim.delve_select
         else:
-            raise Exception('Tag not found: %s'%TAG)
+            #raise Exception('Tag not found: %s'%TAG)
+            logger.warning('Unrecognized tag: %s'%TAG)
+            select = None
 
         edict = dict(zip(exp.dtype.names,exp))
         outfile = args.outfile.format(**edict)
 
         try: 
-            zps = calibrate(outfile,select,exp,args.survey,args.force,transform=args.transform)
+            zps = calibrate(outfile, select, exp, args.survey,
+                            args.force, transform=args.transform)
         except Exception as e:
-            logging.error(str(e))
+            logger.error(str(e))
             status = 1
 
     sys.exit(status)

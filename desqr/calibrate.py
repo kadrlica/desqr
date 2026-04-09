@@ -91,20 +91,20 @@ DESDR2_COEFF = odict([
 # /home/s1/kadrlica/projects/delve/calib/v4/interp
 REFCAT2_INTERP = odict([
     ('g', [
-        ['transInterp.ref2_to_des.g_gr_ref2_North_v3.csv',+3.1-0.1],
-        ['transInterp.ref2_to_des.g_gr_ref2_South_v3.csv',+2.4+1.2],
+        ['transInterp.ref2_to_des.g_gr_ref2_North_v3.csv', +3.1-0.1],
+        ['transInterp.ref2_to_des.g_gr_ref2_South_v3.csv', +2.4+1.2],
     ]),
     ('r', [
-        ['transInterp.ref2_to_des.r_gr_ref2_North_v3.csv',-0.2+0.0],
-        ['transInterp.ref2_to_des.r_gr_ref2_South_v3.csv',+1.8-0.3],
+        ['transInterp.ref2_to_des.r_gr_ref2_North_v3.csv', -0.2+0.0],
+        ['transInterp.ref2_to_des.r_gr_ref2_South_v3.csv', +1.8-0.3],
      ]),
     ('i', [
-        ['transInterp.ref2_to_des.i_iz_ref2_North_v3.csv',-0.0-0.1],
-        ['transInterp.ref2_to_des.i_iz_ref2_South_v3.csv',-0.5-0.4]
+        ['transInterp.ref2_to_des.i_iz_ref2_North_v3.csv', -0.0-0.1],
+        ['transInterp.ref2_to_des.i_iz_ref2_South_v3.csv', -0.5-0.4]
     ]),
     ('z', [
-        ['transInterp.ref2_to_des.z_iz_ref2_North_v3.csv',-1.0+0.1],
-        ['transInterp.ref2_to_des.z_iz_ref2_South_v3.csv',-3.8+1.2]
+        ['transInterp.ref2_to_des.z_iz_ref2_North_v3.csv', -1.0+0.1],
+        ['transInterp.ref2_to_des.z_iz_ref2_South_v3.csv', -3.8+1.2]
     ]),
 ])
 
@@ -226,7 +226,7 @@ def interp_to_des(dataFrame, band, interps, colnames):
         df_interp_north = pd.read_csv(filename)  
         interp_north = interpolate.interp1d(df_interp_north.bin_label.values.astype(float),
                                             df_interp_north.bin_median.values, **kwargs)
-        offset[north_sel] = interp_north(color)[north_sel] + shift
+        offset[north_sel] = interp_north(color)[north_sel] - shift
 
     # Fill offset for objects in the south
     south_sel = dataFrame['DEC'] <= REFCAT2_SPLIT_DEC
@@ -237,7 +237,7 @@ def interp_to_des(dataFrame, band, interps, colnames):
         df_interp_south = pd.read_csv(filename)  
         interp_south = interpolate.interp1d(df_interp_south.bin_label.values.astype(float),
                                             df_interp_south.bin_median.values, **kwargs)
-        offset[south_sel] = interp_south(color)[south_sel] + shift
+        offset[south_sel] = interp_south(color)[south_sel] - shift
 
     # Calculate the magnitude
     if band == 'g':
@@ -444,7 +444,7 @@ def read_refcat(ra, dec, radius=1.5, contrib=None):
     
     nside = 32
     pixels = ang2disc(nside, ra, dec, radius, inclusive=True)
-    dirname = '/data/des40.b/data/atlas-refcat2/healpix'
+    dirname = '/data/delve01.b/data/atlas-refcat2/healpix'
     basename = 'atlas-refcat2_%05d.fits'
     filenames = [os.path.join(dirname,basename%p) for p in pixels]
     columns = REFCAT2_COLUMNS

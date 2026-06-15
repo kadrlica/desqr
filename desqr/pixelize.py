@@ -170,7 +170,8 @@ def pixelize(infiles, outdir='hpx', outbase=HPXBASE, nside=16, force=False,
         logger.info('(%i/%i) %s'%(i+1, len(infiles), infile))
         data = read_file(infile, filetype, float32)
         if data is None: continue
-        #### ADW: Horrible Hack to make SNR cut!!!
+        #### ADW: Horrible hack for SNR cut!!! Pixelize should not alter table contents
+        #logger.warn("HORRIBLE SNR HACK!!!")
         #data = data[snr_select(data, snr=100)]
         #if not len(data): continue
         
@@ -196,22 +197,39 @@ def pixelize(infiles, outdir='hpx', outbase=HPXBASE, nside=16, force=False,
             outfile = os.path.join(outdir,outbase%pix)
             arr = data[catalog_pix == pix]
 
-            if not os.path.exists(outfile):
-                logger.debug("Creating %s"%outfile)
-                out=fitsio.FITS(outfile,mode='rw')
-                out.write(arr)
-                out[1].write_key('COORDSYS','CEL',comment='Coordinate system')
-                out[1].write_key('ORDERING','RING',comment='HEALPix ordering scheme')
-                out[1].write_key('NSIDE',nside,comment='HEALPix nside')
-                out[1].write_key('HPX',pix,comment='HEALPix pixel (RING)')
-                out[1].write_key('BAND',band,comment='Photometric band')
-            else:
-                logger.debug("Appending to %s"%outfile)
-                out=fitsio.FITS(outfile,mode='rw')
-                out[1].append(arr)
+            header = [
+                {'name':'COORDSYS', 'value':'CEL', 'comment':'Coordinate system'},
+                {'name':'ORDERING', 'value':'RING', 'comment':'HEALPix ordering scheme'},
+                {'name':'NSIDE', 'value':nside, 'comment':'HEALPix nside'},
+                {'name':'HPX', 'value':pix, 'comment':'HEALPix pixel (RING)'},
+                {'name':'BAND', 'value':band, 'comment':'Photometric band'},
+            ]
 
-            logger.debug("Writing %s"%outfile)
-            out.close()
+            with fitsio.FITS(outfile, 'rw') as out:
+                if len(out) > 0:
+                    logger.debug(f"Appending to {outfile}")
+                    out[1].append(arr)
+                else:
+                    logger.debug(f"Creating {outfile}")
+                    out.write(arr, header=header)
+            logger.info(f"Wrote {outfile}.")
+            
+            #if not os.path.exists(outfile):
+            #    logger.debug("Creating %s"%outfile)
+            #    out=fitsio.FITS(outfile,mode='rw')
+            #    out.write(arr, header=hdr)
+            #    out[1].write_key('COORDSYS','CEL',comment='Coordinate system')
+            #    out[1].write_key('ORDERING','RING',comment='HEALPix ordering scheme')
+            #    out[1].write_key('NSIDE',nside,comment='HEALPix nside')
+            #    out[1].write_key('HPX',pix,comment='HEALPix pixel (RING)')
+            #    out[1].write_key('BAND',band,comment='Photometric band')
+            #else:
+            #    logger.debug("Appending to %s"%outfile)
+            #    out=fitsio.FITS(outfile,mode='rw')
+            #    out[1].append(arr)
+            # 
+            #logger.debug("Writing %s"%outfile)
+            #out.close()
 
 if __name__ == "__main__":
     import argparse

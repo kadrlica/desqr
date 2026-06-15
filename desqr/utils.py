@@ -289,7 +289,11 @@ def ccdnum(infile,outfile=None,force=True):
 def load(args):
     infile,columns = args
     logger.debug("Loading %s..."%infile)
-    return fitsio.read(infile,columns=columns)
+    try:
+        return fitsio.read(infile,columns=columns)
+    except Exception as e:
+        logger.error(f"file load error: {infile}")
+        raise(e)
 
 def load_infiles(infiles, columns=None, multiproc=False):
     if isstring(infiles):
@@ -562,19 +566,52 @@ def print_problem(msg):
     import termcolor as color
     print(color(msg,'red'))
 
-def print_statistics(hpxmap, unit=''):
-    q = [5,16,50,84,95]
-    p = np.nanpercentile(hpxmap[np.isfinite(hpxmap)],q)
-    s68 = (p[3]-p[1])
-    std = np.nanstd(hpxmap[np.isfinite(hpxmap)])
+def masked_array(array, badvals=hp.UNSEEN):
+    if isinstance(array,np.ma.MaskedArray):
+        return array
+    mask = ~np.isfinite(array) | np.in1d(array, badvals)
+    return np.ma.MaskedArray(array, mask=mask, fill_value=np.nan)
 
+def calc_peak(hpxmap, bins=100):
+    """ Simple peak from histogram. """
+    data = masked_array(hpxmap)
+    num, bins = np.histogram(data.compressed(), bins=bins)
+    peak = ((bins[1:]+bins[:-1])/2.)[np.argmax(num)]
+    return peak
+
+def calc_statistics(hpxmap, q=[5, 16, 50, 84, 95], bins=100):
+    """Calculate summary statistics of the map."""
+    data = masked_array(hpxmap).filled()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        mean = np.nanmean(data)
+        median = np.nanmedian(data)
+        std = np.nanstd(data)
+        p = np.nanpercentile(data, q)
+        s68 = np.ptp(np.nanpercentile(data, [16, 84]))
+        peak = calc_peak(hpxmap, bins)
+        
+    if np.isnan(data).all():
+        warnings.warn("Statistics calculated on all-NaN array", RuntimeWarning)
+
+    stats = dict(mean=mean, median=median, peak=peak,
+                 std=std, q=q, p=p, s68=s68)
+    return stats
+
+def print_statistics(hpxmap, q=[5, 16, 50, 84, 95], bins=100, unit=''):
+    """Print summary statistics of the map."""
+    stats = calc_statistics(hpxmap, q=q, bins=bins)
+    pct_str = ', '.join(f'{q_:.0f}' for q_ in stats['q'])
+    val_str = ', '.join(f'{p_:.1f}' for p_ in stats['p'])
+    print(f"  MEAN: {stats['mean']:.1f} {unit}")
+    print(f"  MEDIAN: {stats['median']:.1f} {unit}")
+    print(f"  PEAK: {stats['peak']:.1f} {unit}")
+    print(f"  STDDEV: {stats['std']:.1f} {unit}")
+    print(f"  68% Interval: {stats['s68']:.1f} {unit}")
+    print(f"  [{pct_str}]%: {val_str} {unit}")
+    return stats
     
-    print("  [%.0f,%.0f,%.0f]%%: %0.1f/%0.1f/%0.1f %s"%(q[0],q[2],q[4],p[0],p[2],p[4], unit))
-    print("  68%% Interval: %0.1f %s"%(s68, unit))
-    print("  STDDEV: %0.1f %s"%(std, unit))
-
-    return p,s68,std
-
 def set_memory_limit(mlimit):
     """Set the (soft) memory limit for setrlimit.
 

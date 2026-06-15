@@ -137,8 +137,9 @@ def writefile(filename,data,force=False):
         raise Exception(msg)
 
 @utils.ignore_warning(UserWarning)
-def ebv(ra,dec,ebvmap=None):
+def ebv(ra, dec, ebvmap=None):
     """Calculate E(B-V) value by interpolating a map."""
+    isscalar = np.ndim(ra) == 0
     ra = np.atleast_1d(ra)
     dec = np.atleast_1d(dec)
 
@@ -149,20 +150,22 @@ def ebv(ra,dec,ebvmap=None):
     if ebvmap is None or (utils.isstring(ebvmap) and ebvmap.lower() == 'sfd'):
         # Download SFD map
         url = "http://lambda.gsfc.nasa.gov/data/foregrounds/SFD/lambda_sfd_ebv.fits"
-        logger.info("Downloading %s..."%url)
+        logger.debug("Downloading %s..."%url)
         filename = tempfile.NamedTemporaryFile().name
         cmd = "wget %s -O %s"%(url,filename)
         subprocess.call(cmd,shell=True)
         ebvmap = hp.read_map(filename)
         os.remove(filename)
     elif utils.isstring(ebvmap):
-        logger.info("Loading %s..."%ebvmap)
+        logger.debug("Loading %s..."%ebvmap)
         ebvmap = hp.read_map(ebvmap)
 
     # The SFD map is in Galactic coordinates
     glon,glat = cel2gal(ra,dec)
     ebv = healpix.get_interp_val(ebvmap,glon,glat)
-    return ebv
+
+    # get_interp_val returns a scalar for a len=1 array ...
+    return ebv if isscalar else np.atleast_1d(ebv)
 
 def extinction(ebv,band,coeff=None):
     """

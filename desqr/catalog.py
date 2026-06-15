@@ -15,7 +15,7 @@ import healpy as hp
 import scipy.ndimage as nd
 
 from desqr import const
-from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS, MINEPOCHS
 from desqr.const import BADMAG, BADVAL
 from desqr import utils
 from desqr.utils import bfield, bfields, load_infiles, verbose
@@ -596,12 +596,19 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-b','--bands',default=None,action='append')
+    parser.add_argument('-m','--mlimit',default=None,type=float,
+                        help='memory limit (GB)')
     parser.add_argument('--min-bands',default=None,type=int)
     parser.add_argument('--min-epochs',default=None,type=int)
     parser.add_argument('--ebv',default=None)
     args = parser.parse_args()
 
     if args.verbose: logger.setLevel(logger.DEBUG)
+
+    if args.mlimit: 
+        logger.info("Setting memory limit: %.1fGB"%(args.mlimit))
+        soft,hard = set_memory_limit(args.mlimit*1024**3)
+        logger.info("Memory limit: %.1fGB"%(soft/1024.**3))
 
     if args.bands: BANDS = args.bands
     if args.min_bands: MINBANDS = args.min_bands
@@ -612,7 +619,7 @@ if __name__ == "__main__":
         sys.exit()
 
     logger.info("Loading files: %s"%args.infiles)
-    data = load_infiles(args.infiles,INPUT_COLS)
+    data = load_infiles(args.infiles, INPUT_COLS)
     logger.info("All objects: %i"%len(data))
 
     good = good_objects(data)
@@ -632,10 +639,21 @@ if __name__ == "__main__":
     check_keys(catalog,keys)
     logger.info("Quality objects: %i"%len(catalog))
 
-    if args.outfile and len(catalog):
-        logger.info("Writing %s..."%args.outfile)
-        utils.write(args.outfile,catalog,force=args.force)
+    # Don't write empty files
+    if len(catalog) == 0:
+        logger.info(f"No quality objects found; exiting...")
+        sys.exit(0)
 
-    if args.keyfile and len(keys):
-        logger.info("Writing %s..."%args.keyfile)
-        utils.write(args.keyfile,keys,force=args.force)
+    # Write the header
+    header = []
+    hdr = fitsio.read_header(args.infiles[0], ext=1)
+    for name in ['COORDSYS', 'ORDERING', 'NSIDE', 'HPX']:
+        header += [dict(name=name, value=hdr.get(name), comment=hdr.get_comment(name))]
+    
+    if args.outfile:
+        logger.info(f"Writing {len(catalog)} objects to {args.outfile}...")
+        utils.write(args.outfile,catalog,header=header,force=args.force)
+
+    if args.keyfile:
+        logger.info(f"Writing {len(keys)} keys to {args.keyfile}...")
+        utils.write(args.keyfile,keys,header=header,force=args.force)

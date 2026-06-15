@@ -18,9 +18,8 @@ from desqr.const import OBJECT_ID
 if __name__ == "__main__":
     from desqr.parser import Parser
     parser = Parser(description=__doc__)
-    parser.set_defaults(njobs=12) 
-    parser.add_argument('-m','--mlimit',default=40,type=int,
-                        help='memory limit (GB)')
+    parser.set_defaults(njobs=12)
+    parser.set_defaults(mlimit=40) # GB
     args = parser.parse_args()
 
     config = args.config

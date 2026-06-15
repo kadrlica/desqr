@@ -4,6 +4,7 @@ Pipeline parser
 __author__ = "Alex Drlica-Wagner"
 import argparse
 import yaml
+import numpy as np
 
 from desqr.logger import logger
 
@@ -20,6 +21,8 @@ class Parser(argparse.ArgumentParser):
                           default=None)
         self.add_argument('-f','--force',action='store_true',
                           help='force overwrite')
+        self.add_argument('-m','--mlimit',default=None,type=int,
+                          help='memory limit (GB)')
         self.add_argument('-n','--njobs',default=30,type=int,
                           help='number of jobs to submit')
         self.add_argument('-p','--pix',action='append',type=str,
@@ -47,7 +50,7 @@ class Parser(argparse.ArgumentParser):
         for pix in opts.pix:
             try:
                 pixlist = np.genfromtxt(pix).to_list()
-            except TypeError: 
+            except FileNotFoundError: 
                 pixlist = [int(pix)]
                 
             pixels += pixlist

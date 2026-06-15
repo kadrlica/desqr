@@ -120,7 +120,7 @@ def count_objects(args):
     return num
 
 def check_columns(args,columns=None,select=None,msg=None):
-    """ Abstract base function for checking a column"""
+    """ Abstract base function for checking a column."""
     global counter
     f,nfiles,band = args
 
@@ -128,8 +128,16 @@ def check_columns(args,columns=None,select=None,msg=None):
     print_running(counter.value,nfiles,indent=4,step=1)
 
     try: 
-        data = fitsio.read(f,columns=columns)
+        data = fitsio.read(f, columns=columns)
+    except OSError as e:
+        # Empty files are ok
+        nrows = fitsio.FITS(f,'r')[1].get_nrows()
+        if nrows: raise(e)
+        msg = f"{e}: {f}"
+        print(color(msg,'yellow'))
+        return False
     except ValueError as e:
+        # Missing columns are not
         msg = "Couldn't read %(columns)s from %(filename)s"
         msg = msg%dict(columns=columns,filename=f)
         print(color(msg,'red'))
@@ -141,7 +149,7 @@ def check_columns(args,columns=None,select=None,msg=None):
         #msg = msg%dict(columns=columns,filename=f)
         if msg: 
             print(msg%dict(columns=columns,filename=f))
-        if not isinstance(sel,(bool,type(np.bool))):
+        if not isinstance(sel,(bool,type(np.bool_))):
             msg = "Bad %(columns)s value in %(filename)s"
             print(msg%dict(columns=columns,filename=f))
             print(4*' '+bad_values_str(data[sel]))
@@ -192,13 +200,13 @@ def check_objid(args):
     return check_columns(args,**kwargs)
 
 def check_match(args):
-    """ Check match fraction """
+    """ Check match fraction based on NEPOCHS """
     def select(x):
         nobjs = float(len(x))
         frac = (x > 0).sum()/nobjs
         bad = (frac < 0.1) and (nobjs > 1e4)
         if bad:
-            msg = 'Match fraction = %.2f;'%frac
+            msg = 'Match fraction = %.2f; '%frac
             print(color(msg,'yellow'),end="")
         return bad
     msg = color("Poor match in %(filename)s",'yellow')
@@ -365,17 +373,18 @@ if __name__ == "__main__":
                 nfiles = len(files)
                 arglist = [(f,nfiles,band) for f in files]
 
-                CATCOUNT = 0
+                if CATCOUNT == 0:
+                    # Only need to run these once across bands
+                    print(2*' '+"Objects:")
+                    out = run_pool(count_objects,arglist)
+                    CATCOUNT = np.sum(out)
+                    print(CATCOUNT, OK)
 
-                print(2*' '+"Objects:")
-                out = run_pool(count_objects,arglist)
-                CATCOUNT = np.sum(out)
-                print(CATCOUNT, OK)
-                 
-                print(2*' '+"RA:")
-                out = run_pool(check_ra,arglist)
-                print(FAIL if np.any(out) else OK)
+                    print(2*' '+"RA:")
+                    out = run_pool(check_ra,arglist)
+                    print(FAIL if np.any(out) else OK)
 
+                # Band dependent
                 print(2*' '+"Match Fraction:")
                 out = run_pool(check_match,arglist)
                 print(FAIL if np.any(out) else OK)

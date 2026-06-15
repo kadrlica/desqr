@@ -145,10 +145,19 @@ def calculate_depth(filename, nside=NSIDE, snr=10.0,
     mag_snr = (2.5/np.log(10)) / (snr)
 
     logger.info(filename)
-    ret = dict()
+
+    # Default empty value
+    ret = {band: [np.array([],dtype=int),np.array([])] for band in BANDS}
+
     for band,mag,magerr,spread in zip(BANDS,MAGS,MAGERRS,SPREADS):
         columns = ['RA','DEC'] + [mag, magerr, spread]
-        data = fitsio.read(filename,columns=columns)
+
+        try:
+            data = fitsio.read(filename,columns=columns)
+        except OSError as e:
+            nrows = fitsio.FITS(filename)[1].get_nrows()
+            if nrows == 0: continue
+            else: raise(e)
 
         h, edges = np.histogram(data[mag], bins=np.arange(17, 30, 0.1))
         mag_bright = edges[np.argmax(h)] - 3.
@@ -163,7 +172,6 @@ def calculate_depth(filename, nside=NSIDE, snr=10.0,
         d = data[cut]
         if len(d) < 2:
             logger.warning("Insufficent objects in %s-band"%band)
-            ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
         pix = hp.ang2pix(nside,d['RA'],d['DEC'],lonlat=True)
@@ -179,7 +187,6 @@ def calculate_depth(filename, nside=NSIDE, snr=10.0,
 
         if cut_nan_inf.sum() < 2:
             logger.warning("Insufficent objects in %s-band"%band)
-            ret[band] = [np.array([],dtype=int),np.array([])]            
             continue
 
         kde = scipy.stats.gaussian_kde(ratio[cut_nan_inf])
@@ -217,13 +224,23 @@ def depth_bdf_mag(filename, nside=NSIDE, snr=10.0):
                            stargal=None)
 
 
-def teff(infile,nside=NSIDE,mode='median'):
+def teff(filename,nside=NSIDE,mode='median'):
     TEFFS = bfields('TEFF',BANDS)
 
-    logger.info(infile)
-    ret = dict()
+    logger.info(filename)
+
+    # Default empty value
+    ret = {band: [np.array([],dtype=int),np.array([])] for b in BANDS}
+
     for band,teff in zip(BANDS,TEFFS):
-        data = fitsio.read(infile,columns=['RA','DEC',teff])
+        columns = ['RA','DEC',teff]
+        try:
+            data = fitsio.read(filename,columns=columns)
+        except OSError as e:
+            nrows = fitsio.FITS(filename)[1].get_nrows()
+            if nrows == 0: continue
+            else: raise(e)
+
         pix = hp.ang2pix(nside,data['RA'],data['DEC'],lonlat=True)
         hpx = np.unique(pix)        
 

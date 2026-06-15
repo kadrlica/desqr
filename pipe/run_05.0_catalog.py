@@ -16,6 +16,8 @@ from desqr.utils import is_found, mkdir
 if __name__ == "__main__":
     from desqr.parser import Parser
     parser = Parser()
+    parser.set_defaults(njobs=24)
+    parser.set_defaults(mlimit=50) # GB
     args = parser.parse_args()
 
     print("Running catalog creation...")
@@ -38,7 +40,8 @@ if __name__ == "__main__":
 
         if len(infiles) == 0: continue
         if is_found(catfile,args.force): continue
-        print("(%s/%s): %s"%(i+1,len(pixels), pix))
+        ra,dec = hp.pix2ang(config['nside'], pix, lonlat=True)
+        print(f"({i+1}/{len(pixels)}): RA, Dec, Hpx = {ra:.2f}, {dec:.2f}, {i}")
 
         minbands = config.get('minbands')
         minbands = '--min-bands %s'%minbands if minbands else ''
@@ -52,12 +55,12 @@ if __name__ == "__main__":
         params=(' '.join(infiles),catfile,keyfile,bands,minbands,minepochs,ebv,force)
         cmd = 'catalog.py -v %s -o %s -k %s %s %s %s %s %s'%params
 
-        if args.queue == 'local':
-            print(cmd)
-            submit = cmd
-        else:
-            #submit = 'csub -o %s %s'%(logfile,cmd)
-            submit = 'csub -o %s -n %s %s'%(logfile,args.njobs,cmd)
+        #if args.queue == 'local':
+        #    print(cmd)
+        #    submit = cmd
+        #else:
+        #    submit = 'csub -o %s -n %s %s'%(logfile,args.njobs,cmd)
+        submit = f"csub -q {args.queue} -o {logfile} -n {args.njobs} {cmd}"
 
         subprocess.call(submit,shell=True)
         if args.queue != 'local': time.sleep(args.sleep)

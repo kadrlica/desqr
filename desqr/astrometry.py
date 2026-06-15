@@ -10,7 +10,7 @@ import datetime
 
 import yaml
 import matplotlib
-if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
+if os.getenv('TERM').startswith('screen') or not os.getenv('DISPLAY'):
     matplotlib.use('Agg')
 import pylab as plt
 
@@ -28,8 +28,9 @@ from desqr.utils import mkdir, blank, mr_nice_guy, angsep
 from desqr.match import match_query
 from desqr.logger import logger
 
+NSIDE = 32
 COLUMNS = [OBJECT_ID,'RA','DEC']
-TYPES = ['internal','hpxrms','gaia_dr1','gaia_dr2','gaia_edr3','gaia_dr3']
+TYPES = ['internal','hpx_rms','gaia_dr1','gaia_dr2','gaia_edr3','gaia_dr3']
 
 # Catalogs to be accessed from Vizier
 VIZIER = odict([
@@ -105,7 +106,7 @@ def draw_astrometry_footprint(hpxmap,survey=None,**kwargs):
 def draw_astrometry_hist(hpxmap,**kwargs):
     """ hpxmap in units of mas """
     kwargs.setdefault('bins',np.linspace(0,200,101))
-    q,p = plotting.draw_hist(hpxmap,**kwargs)
+    q,p = plotting.draw_peak_hist(hpxmap, **kwargs)
     plt.legend(loc='upper right')
     ax = plt.gca()
     ax.set_xlabel('Median Separation (mas)')
@@ -113,8 +114,9 @@ def draw_astrometry_hist(hpxmap,**kwargs):
 def plot_astrometry(filename,outfile=None,survey='delve'):
     """ Plot the astrometry over the footprint """
     print("Reading %s..."%filename)
-    hpxmap = hp.read_map(filename,verbose=False)
-
+    hpxmap = hp.read_map(filename)
+    hpxmap = utils.masked_array(hpxmap)
+    
     label = r'Median Angular Separation (mas)'
     cbar_kwargs = dict(label=label)
     hpxmap_kwargs = dict(xsize=1000)
@@ -283,7 +285,7 @@ def internal_astrometry(catfile,nside=128,band='r',plot=False):
     sepdeg = angsep(ra,dec,hpx['RA'],hpx['DEC'])
     sepsec = sepdeg * 3600.
     sepmas = sepsec * 1000.
-    sel = [sepsec > 1e-5] # remove same objects
+    sel = (sepsec > 1e-5) # remove zero offset
     sep = sepmas[sel]
 
     pix = hp.ang2pix(nside,ra[sel],dec[sel],lonlat=True)
@@ -419,7 +421,7 @@ if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',help='configuration file')
+    parser.add_argument('configfile',help='configuration file')
     parser.add_argument('-b','--band',default='r',choices=BANDS+['griz'])
     parser.add_argument('-n','--nside',default=128,type=int)
     parser.add_argument('-o','--outbase',default='astrom')
@@ -433,11 +435,11 @@ if __name__ == "__main__":
     print("Calculating astrometric offsets ...")
     band = args.band
 
-    config = yaml.safe_load(open(args.config))
+    config = yaml.safe_load(open(args.configfile))
     OBJECT_ID = config.get('objid',OBJECT_ID)
     NSIDE = config['nside']
     NPIX = hp.nside2npix(NSIDE)
-    survey=config.get('survey')
+    survey = config.get('survey')
     catdir = config['catdir']
     catbase = config['catbase']
     hpxdir = config['hpxdir']
@@ -460,6 +462,8 @@ if __name__ == "__main__":
      
     filenames = [os.path.join(catdir,catbase%p) for p in pixels]
     filenames = [f for f in filenames if os.path.exists(f)]
+    # This LMC hpx failed
+    #filenames = [f for f in filenames if '11759' not in f]
     #filenames = filenames[1000:1250]
 
     if not len(filenames):
@@ -493,16 +497,14 @@ if __name__ == "__main__":
     for pix,peak in [r for r in results if r is not None]:
         hpxmap[pix] = peak
      
-    hpxmap = np.ma.MaskedArray(hpxmap,np.isnan(hpxmap),fill_value=np.nan)
+    hpxmap = utils.masked_array(hpxmap)
 
     outfile = join(outdir,outbase+'_n%i.fits.gz'%(nside))
     print("Writing %s..."%outfile)
     hp.write_map(outfile,hpxmap,overwrite=True)
 
-    q = [5,50,95]
-    p = np.percentile(hpxmap.compressed(),q)
     print("Global Astrometric Percentiles:")
-    utils.print_statistics(hpxmap*1000)
+    utils.print_statistics(hpxmap, q=[5,50,95])
 
     print("Plotting %s..."%outfile)
     pngfile = outfile.replace('.fits.gz','.png')

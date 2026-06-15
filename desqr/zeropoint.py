@@ -14,7 +14,7 @@ np.seterr(divide='ignore')
 import pandas as pd
 import fitsio
 
-form desqr import utils
+from desqr import utils
 from desqr.logger import logger
 from desqr.const import BADMAG,BADZP
 

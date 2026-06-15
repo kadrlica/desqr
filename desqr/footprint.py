@@ -10,7 +10,7 @@ from multiprocessing import Pool
 import functools
 
 import matplotlib
-if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
+if os.getenv('TERM').startswith('screen') or not os.getenv('DISPLAY'):
     matplotlib.use('Agg')
 from matplotlib.colors import LogNorm
 import pylab as plt
@@ -41,14 +41,14 @@ MAGLIM = odict([
     ['Y',21.0],
 ])
 
-# SNR maglim
-MAGLIM = odict([
-    ['g',20.0],
-    ['r',19.5],
-    ['i',18.5], # was 22.0
-    ['z',18.5],
-    ['Y',17.0],
-])
+## SNR > 100 maglim
+#MAGLIM = odict([
+#    ['g',20.0],
+#    ['r',19.5],
+#    ['i',18.5], 
+#    ['z',18.5],
+#    ['Y',17.0],
+#])
 
 ## any viable magnitude (i.e., detection)
 #MAGLIM = odict([
@@ -209,7 +209,16 @@ def count(filename, deredden=False):
     ret : dict with [pix,cts] for each selection
     """
     print(filename)
-    data = fitsio.read(filename,columns=COLUMNS)
+
+    # Empty return array
+    ret = {k: [np.array([],dtype=int),np.array([])] for k in skymaps.keys()}
+    
+    try:
+        data = fitsio.read(filename,columns=COLUMNS)
+    except OSError as e:
+        nrows = fitsio.FITS(filename)[1].get_nrows()
+        if nrows == 0: return ret
+        else: raise(e)
 
     # Deredden the magnitudes
     if deredden:
@@ -218,7 +227,6 @@ def count(filename, deredden=False):
             data[c] = data[c] - data[bfield(EXTVAR,c[-1])]
 
     pixels = hp.ang2pix(nside,data['RA'],data['DEC'],lonlat=True)
-    ret = dict()
     for name,(selfn,counts) in skymaps.items():
         pix,cts = np.unique(pixels[selfn(data)],return_counts=True)
         ret[name] = [pix,cts]

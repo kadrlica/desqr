@@ -46,7 +46,7 @@ MJD = ['MJD_OBS']
 
 # Composite of input columns
 BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + IMAGE 
-INPUT_COLS = IDX + [BAND] + COORDS + MJD + BEST
+INPUT_COLS = IDX + COORDS + MJD + BEST
 
 ##################################################
 ################# Output columns #################
@@ -220,7 +220,7 @@ def coadd_coords(lon,lat,labels=None,index=None):
 
     # What about adding a dispersion?
 
-    return lon_out % 360.,lat_out
+    return lon_out % 360.0, lat_out
 
 @verbose
 def coadd_mjd(mjd,labels=None,index=None):
@@ -238,7 +238,7 @@ def coadd_mjd(mjd,labels=None,index=None):
     mjd    : median MJD (days)
     """
     if labels is None: 
-        labels = np.ones(len(lon),dtype=int)
+        labels = np.ones(len(mjd),dtype=int)
 
     if index is None: index = np.unique(labels)
 
@@ -246,7 +246,7 @@ def coadd_mjd(mjd,labels=None,index=None):
 
 @verbose
 def coadd_healpix(lon,lat,nsides=NSIDES,nest=True):
-    pix = [hp.ang2pix(nside,lon,lat,nest=nest,lonlat=True) for nside in NSIDES]
+    pix = [hp.ang2pix(nside,lon,lat,nest=nest,lonlat=True) for nside in nsides]
     return pix
 
 @verbose
@@ -359,7 +359,7 @@ def coadd_objects(data,bands=BANDS):
     # OBJECT_NUMBER has a different meaning (and type) in Y1A1 and Y2N.
     # Standardize it here (wouldn't be necessary if done on download).
     # ADW: Is this working properly?
-    if not keys.dtype['OBJECT_NUMBER'] is not np.dtype('>i8'):
+    if keys.dtype['OBJECT_NUMBER'] != np.dtype('>i8'):
         keys['OBJECT_NUMBER'] = keys['OBJECT_NUMBER'].astype('>i8')
 
     x = coadd_coords(data['RA'],data['DEC'],data[OBJECT_ID],index=unique_ids)
@@ -573,7 +573,7 @@ def check_keys(cat,key):
     Check the number of non-unique objects against the number of
     measured magnitudes.
     """
-    nkey = (keys['UNIQUE_ID'] > 0).sum()
+    nkey = (key['UNIQUE_ID'] > 0).sum()
 
     columns = bfields(['MAG_PSF'],BANDS)
     mags = utils.unstructure(cat[columns])
@@ -614,7 +614,7 @@ if __name__ == "__main__":
     if args.min_bands: MINBANDS = args.min_bands
     if args.min_epochs: MINEPOCHS = args.min_epochs
 
-    if os.path.exists(args.outfile) and not args.force:
+    if args.outfile and os.path.exists(args.outfile) and not args.force:
         logger.warning("Found %s; skipping..."%args.outfile)
         sys.exit()
 

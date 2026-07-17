@@ -14,38 +14,16 @@ import scipy
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
 
-try:
-    from matplotlib.mlab import rec_append_fields
-except ImportError:
-    from ugali.utils.mlab import rec_append_fields
-
-from ugali.utils.projector import angsep
-from ugali.utils.healpix import ang2vec
+#from ugali.utils.projector import angsep
+#from ugali.utils.healpix import ang2vec
 
 from desqr.utils import set_memory_limit, insert_columns
-#from desqr.utils import angsep, ang2vec
+from desqr.utils import angsep, ang2vec
 from desqr.const import ZEROSTR,OBJECT_ID
 from desqr.split import split_qcat
 from desqr.logger import logger
 
 MATCHCOLS = ['RA','DEC','EXPNUM']
-
-### def projector2(lon,lat):
-###     from ugali.utils.projector import SphericalRotator
-###     rotator = SphericalRotator(0,0)
-###  
-###     lon = np.asarray(lon)
-###     lat = np.asarray(lat)
-###  
-###     x, y, z = rotator.cartesian(lon.ravel(),lat.ravel())
-###     coords = np.empty((x.size, 3))
-###     coords[:, 0] = x
-###     coords[:, 1] = y
-###     coords[:, 2] = z
-###     return coords
-
-def projector(lon, lat):
-    return ang2vec(lon,lat)
 
 def centroid(lon,lat,stat='median',labels=None,index=None):
     if labels is None: 
@@ -53,7 +31,8 @@ def centroid(lon,lat,stat='median',labels=None,index=None):
 
     if index is None: index = np.unique(labels)
 
-    x,y,z = hp.rotator.dir2vec(lon,lat,lonlat=True)
+    #x,y,z = hp.rotator.dir2vec(lon,lat,lonlat=True)
+    x,y,z = ang2vec(lon,lat).T
 
     if stat == 'mean':
         x_out = nd.mean(x,labels=labels,index=index)
@@ -172,7 +151,7 @@ def match_query(lon1,lat1,lon2,lat2,eps=0.01,n_jobs=1):
     ds = angsep(lon1, lat1, lon2[idx2], lat2[idx2])
     return np.atleast_1d(idx1), np.atleast_1d(idx2), np.atleast_1d(ds)
 
-def match_ball_tree(lon,lat,radius=1.0):
+def match_ball_tree(lon,lat,radius=1.0,eps=0.01):
     """ 
     Internal catalog match. Finds closest match to each object other
     than the object itself.
@@ -182,10 +161,11 @@ def match_ball_tree(lon,lat,radius=1.0):
     lon : longitude (deg)
     lat : latitude (deg)
     radius : match radius (arcsec)
+    eps : kdTree approximation parameter
     
     Returns
     -------
-    match_id : 
+    match_id : the unique matching id
     """
     if len(lon) != len(lat):
         msg = "Input lon and lat do not match"
@@ -199,11 +179,10 @@ def match_ball_tree(lon,lat,radius=1.0):
      
     # First iteration...
     coords = ang2vec(lon, lat)
-    #dist = (radius/3600.)*(np.pi/180.)
     dist = 2.0*np.sin(np.deg2rad(radius/3600.)/2.0)
     tree = cKDTree(coords)
     logger.info("Querying ball tree with radius %s arcsec..."%radius)
-    idx = tree.query_ball_tree(tree,dist,eps=0.01)
+    idx = tree.query_ball_tree(tree,dist,eps=eps)
     # Because memory...
     del tree, coords
     gc.collect()
@@ -212,7 +191,7 @@ def match_ball_tree(lon,lat,radius=1.0):
     logger.info("Filling matched IDs.")
     match_id = -1*np.ones(nobjs,dtype=int)
     # Ordering has a +/-1% effect on the number of matches
-    # Starting with most match minimizes the number of unique objects
+    # Starting with most matched minimizes the number of unique objects
     # [831713 < 839700 < 847271]
     #np.arange(len(data)):
     #np.argsort([len(i) for i in idx]):
@@ -225,6 +204,73 @@ def match_ball_tree(lon,lat,radius=1.0):
     logger.info("Found %i unique objects."%len(uid))
 
     return match_id
+
+def match_pairs(lon,lat,radius=1.0,eps=0.0):
+    """ 
+    Internal catalog match. Finds closest match to each object other
+    than the object itself.
+
+    Parameters
+    ----------
+    lon : longitude (deg)
+    lat : latitude (deg)
+    radius : match radius (arcsec)
+    eps : kdTree approximation parameter
+
+    Returns
+    -------
+    match_id : the unique matching id
+    """
+    if len(lon) != len(lat):
+        msg = "Input lon and lat do not match"
+        raise Exception(msg)
+    if np.any(np.isnan(lon)):
+        msg = "Invalid value found in lon: nan"
+        raise ValueError(msg)
+
+    nobjs = len(lon)
+    logger.info("Matching %i objects."%nobjs)
+     
+    # First iteration...
+    coords = ang2vec(lon, lat)
+    dist = 2.0*np.sin(np.deg2rad(radius/3600.)/2.0)
+    tree = cKDTree(coords)
+    logger.info("Querying pairs with radius %s arcsec..."%radius)
+    pairs = tree.query_pairs(dist, eps=eps, output_type='ndarray')
+    # Clean up memory.
+    del tree, coords
+    gc.collect()
+
+    # neighbor counts (excluding self)
+    counts = np.bincount(pairs.ravel(), minlength=nobjs)
+     
+    # CSR adjacency: symmetrize edges into flat arrays
+    i = np.concatenate([pairs[:, 0], pairs[:, 1]]).astype(np.int32)
+    j = np.concatenate([pairs[:, 1], pairs[:, 0]]).astype(np.int32)
+    del pairs
+    order = np.argsort(i, kind='stable')
+    indices = j[order]
+    del i, j, order
+    indptr = np.concatenate([[0], np.cumsum(counts)])
+    
+    # This could probably be improved...
+    logger.info("Filling matched IDs.")
+    # Ordering has a +/-1% effect on the number of matches
+    # Starting with most matched minimizes the number of unique objects
+    # [831713 < 839700 < 847271]
+    match_id = -np.ones(nobjs, dtype=int)
+    for k in np.argsort(counts)[::-1]:
+        if match_id[k] >= 0:
+            continue
+        match_id[indices[indptr[k]:indptr[k+1]]] = k
+        match_id[k] = k
+    
+    uid,inv = np.unique(match_id,return_inverse=True)
+    match_id[:] = np.arange(len(uid))[inv]
+    logger.info("Found %i unique objects."%len(uid))
+
+    return match_id
+
 
 def match_multi_stage(lon,lat,radius=1.0):
     """
@@ -342,35 +388,50 @@ def match_exposures(data,radius=1.0):
 
     return match_id 
 
-def split(data,match_id,objid=OBJECT_ID):
+def split(data, match_id, objid=OBJECT_ID, debug=False):
     """Split matched objects into pairs if consistently separated.
     
     Wraps around the `split_qcat` function from Eric Neilsen.
+
+    Debug output includes [OBJECT_ID, PARENT_ID, SUB_ID, SPLIT_FLAG]
     
     Parameters:
     -----------
     data     : the input record array
     match_id : array of object match ID
+    objid    : name of the object id column
+    debug    : return additional columns beyond OBJECT_ID
 
     Returns:
     --------
-    rec       : recarray of [OBJECT_ID,'PARENT_ID','SUB_ID','SPLIT_FLAG']
+    rec       : output recarray 
     """
-    # Columns used by the split
+    # Additional output columns from the split
     parid,subid,flag = ['PARENT_ID','SUB_ID','SPLIT_FLAG']
-    dtype = [(objid,int),(parid,int),(subid,'i2'),(flag,'S15')]
+    dtype = [(objid,int)]
+    if debug:
+        dtype += [(parid,int),(subid,'i2'),(flag,'S15')]
 
     # Create a DataFrame and run the splitting
-    df = pd.DataFrame(data.byteswap().newbyteorder())
+    #df = pd.DataFrame(data.byteswap().newbyteorder())
+    # For memory efficiency, create df from views of columns
+    df = pd.DataFrame({n: data[n] for n in data.dtype.names})
     df[objid] = match_id
-    df[parid] = match_id
+    #df[parid] = match_id  # move to the end for memory
 
-    split = split_qcat(df)[[objid,parid,subid,flag]]
-
+    split = split_qcat(df)
     if len(split) != len(df):
         msg = "Length of split objects differs from input."
         raise Exception(msg)
-        
+    # Clean up
+    del df
+    gc.collect()
+
+    # Do this separately to reduce peak memory use
+    #split = split[[objid,parid,subid,flag]]
+    split = split[[objid,subid,flag]]
+    split[parid] = match_id
+    
     # Increment the match_id for split objects
     objid_max = split[objid].max()
     subid_sel = (split[flag] == 'split') & (split[subid] > 0)
@@ -378,15 +439,15 @@ def split(data,match_id,objid=OBJECT_ID):
     group_id = split.loc[subid_sel].groupby([objid,subid]).ngroup()
     split.loc[group_id.index,objid] = objid_max + 1 + group_id.values
 
-    # Convert back to recarray 
-    rec = np.empty(len(split),dtype=dtype)
-    for n in rec.dtype.names:
-        rec[n] = split[n]
-
     # Number of split objects and new objects
     ndet = (split[flag] == 'split').sum()
     nobj = len(np.unique(group_id))
     logger.info("Split %i detections into %i new objects."%(ndet,nobj))
+
+    # Convert back to recarray 
+    rec = np.empty(len(split),dtype=dtype)
+    for n in rec.dtype.names:
+        rec[n] = split[n]
 
     return rec
 
@@ -394,16 +455,20 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('infiles',nargs='+')
-    parser.add_argument('-r','--radius',default=1.0,type=float,
-                        help='matching radius')
+    parser.add_argument('--debug',action='store_true',
+                        help='write additional output columns')
+    parser.add_argument('-f','--force',action='store_true',
+                        help='overwrite output columns if they exist')
     parser.add_argument('-m','--mlimit',default=None,type=float,
                         help='memory limit (GB)')
     parser.add_argument('-o','--objid',default=OBJECT_ID,
                         help='name of output object identifier')
-    parser.add_argument('-f','--force',action='store_true',
-                        help='overwrite output columns if they exist')
+    parser.add_argument('-r','--radius',default=1.0,type=float,
+                        help='matching radius')
     parser.add_argument('-s','--split',action='store_true',
                         help='split double objects')
+    parser.add_argument('-t','--type',choices=['ball','pairs','multi'], default='ball',
+                        help='matching algorithm')
     parser.add_argument('-v','--verbose',action='store_true',
                         help='output verbosity')
     args = parser.parse_args()
@@ -420,33 +485,42 @@ if __name__ == "__main__":
     fileidx = odict()
 
     data = []
-    for i,f in enumerate(args.infiles):
-        d,hdr = fitsio.read(f,header=True,columns=MATCHCOLS)
+    pix = None
+    imin = 0
+    logger.info("Loading files:")
+    for i, f in enumerate(args.infiles):
+        logger.info(f"  {f}") 
+        d, hdr = fitsio.read(f, header=True, columns=MATCHCOLS)
         if i == 0:
-            imin = 0
-            data = d
             pix = hdr.get('HPX')
-        else:
-            imin = len(data)
-            data = np.append(data,d)
-            if hdr.get('HPX') != pix:
-                logger.warning('HEALPix pixels do not match')
-        imax = len(data) 
-        fileidx[f]=slice(imin,imax)
-
+        elif hdr.get('HPX') != pix:
+            logger.warning('HEALPix pixels do not match')
+        data.append(d)
+        fileidx[f] = slice(imin, imin + len(d))
+        imin += len(d)
+        
+    data = np.concatenate(data)
+       
     zero_id = int(ZEROSTR%(pix,0))
 
     if len(data) == 1:
         match_id = np.array([0])
-    else:
+    elif args.type == 'ball':
         match_id = match_ball_tree(data['RA'],data['DEC'],radius=args.radius)
-        #match_id = match_multi_stage(data['RA'],data['DEC'],radius=args.radius)
+    elif args.type == 'pairs':
+        match_id = match_pairs(data['RA'],data['DEC'],radius=args.radius)
+    elif args.type == 'multi':
+        match_id = match_multi_stage(data['RA'],data['DEC'],radius=args.radius)
+    else:
+        msg = f"Unrecognized matching algorthim: {args.type}"
+        raise Exception(msg)
+            
     match_id += zero_id
 
     if args.split:
         # Run the split
         logger.info("Splitting objects...")
-        out = split(data,match_id,objid=args.objid)
+        out = split(data,match_id,objid=args.objid,debug=args.debug)
     else:
         # Just use the match_id
         out = np.rec.array(match_id,dtype=[(args.objid,match_id.dtype)],copy=False)
@@ -455,4 +529,3 @@ if __name__ == "__main__":
     for f,idx in fileidx.items():
         logger.info("Inserting column(s) into %s..."%f)
         insert_columns(f,out[idx],force=args.force)
-     

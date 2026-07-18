@@ -14,42 +14,13 @@ import scipy
 from scipy.spatial import cKDTree
 import scipy.ndimage as nd
 
-#from ugali.utils.projector import angsep
-#from ugali.utils.healpix import ang2vec
-
 from desqr.utils import set_memory_limit, insert_columns
-from desqr.utils import angsep, ang2vec
+from desqr.utils import angsep, ang2vec, sphere_centroid
 from desqr.const import ZEROSTR,OBJECT_ID
 from desqr.split import split_qcat
 from desqr.logger import logger
 
 MATCHCOLS = ['RA','DEC','EXPNUM']
-
-def centroid(lon,lat,stat='median',labels=None,index=None):
-    if labels is None: 
-        labels = np.ones(len(lon),dtype=int)
-
-    if index is None: index = np.unique(labels)
-
-    #x,y,z = hp.rotator.dir2vec(lon,lat,lonlat=True)
-    x,y,z = ang2vec(lon,lat).T
-
-    if stat == 'mean':
-        x_out = nd.mean(x,labels=labels,index=index)
-        y_out = nd.mean(y,labels=labels,index=index)
-        z_out = nd.mean(z,labels=labels,index=index)
-    elif stat == 'median':
-        x_out = nd.median(x,labels=labels,index=index)
-        y_out = nd.median(y,labels=labels,index=index)
-        z_out = nd.median(z,labels=labels,index=index)
-    else:
-        msg = "Unrecognized stat: %s"%stat
-        raise Exception(msg)
-
-    lon_out, lat_out = hp.rotator.vec2dir(x_out,y_out,z_out,lonlat=True)
-
-    return lon_out % 360.,lat_out
-
 
 def match_to_self(lon, lat, radius, min_match=1, min_obs=1):
     """Match a list of lon/lat positions to itself.
@@ -298,7 +269,7 @@ def match_multi_stage(lon,lat,radius=1.0):
     uid = np.unique(ball1_id)
 
     logger.info("Calculating match coordinates...")
-    median_lon,median_lat = centroid(lon,lat,stat='median',labels=ball1_id,index=uid)
+    median_lon,median_lat = sphere_centroid(lon,lat,stat='median',labels=ball1_id,index=uid)
 
     logger.info("Matching against matches...")
     idx1,idx2,sep = match_query(lon,lat,median_lon,median_lat)

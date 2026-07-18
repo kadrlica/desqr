@@ -6,8 +6,9 @@ import time
 import glob
 
 import numpy as np
-import upload
-from utils import mkdir
+
+from desqr import upload
+from desqr.utils import mkdir
 
 SECTIONS = ['cat','key']
 if __name__ == "__main__":

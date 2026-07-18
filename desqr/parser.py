@@ -2,8 +2,11 @@
 Pipeline parser
 """
 __author__ = "Alex Drlica-Wagner"
-import logging
 import argparse
+import yaml
+import numpy as np
+
+from desqr.logger import logger
 
 class Parser(argparse.ArgumentParser):
     def __init__(self,*args,**kwargs):
@@ -11,11 +14,15 @@ class Parser(argparse.ArgumentParser):
                           argparse.ArgumentDefaultsHelpFormatter)
         super(Parser,self).__init__(*args,**kwargs)
 
-        self.add_argument('config')
+        self.add_argument('configfile')
         self.add_argument('--dryrun',action='store_true',
                           help='run in dryrun mode')
+        self.add_argument('-b', '--bands', action='append',
+                          default=None)
         self.add_argument('-f','--force',action='store_true',
                           help='force overwrite')
+        self.add_argument('-m','--mlimit',default=None,type=int,
+                          help='memory limit (GB)')
         self.add_argument('-n','--njobs',default=30,type=int,
                           help='number of jobs to submit')
         self.add_argument('-p','--pix',action='append',type=str,
@@ -27,11 +34,15 @@ class Parser(argparse.ArgumentParser):
         self.add_argument('-v','--verbose',action='store_true',
                           help='output verbosity')
 
-    def _parse_verbose(self,opts):
+    def _parse_verbose(self, opts):
         """Set logging level based on verbosity"""
-        level = logging.DEBUG if vars(opts).get('verbose') else logging.INFO
-        logging.getLogger().setLevel(level)
+        level = logger.DEBUG if vars(opts).get('verbose') else logger.INFO
+        logger.setLevel(level)
 
+    def _parse_config(self, opts):
+        """Load config from file."""
+        opts.config = yaml.safe_load(open(opts.configfile))
+        
     def _parse_pixels(self,opts):
         if not opts.pix: return
 
@@ -39,16 +50,18 @@ class Parser(argparse.ArgumentParser):
         for pix in opts.pix:
             try:
                 pixlist = np.genfromtxt(pix).to_list()
-            except TypeError: 
+            except FileNotFoundError: 
                 pixlist = [int(pix)]
                 
             pixels += pixlist
                 
         opts.pix = pixels
-            
         
-    def parse_args(self,*args,**kwargs):
+    def parse_args(self, *args, **kwargs):
         opts = super(Parser,self).parse_args(*args,**kwargs)
         self._parse_verbose(opts)
+        self._parse_config(opts)
+        self._parse_pixels(opts)
+        
         return opts
 

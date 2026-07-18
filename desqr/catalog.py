@@ -14,13 +14,12 @@ import numpy.lib.recfunctions as recfuncs
 import healpy as hp
 import scipy.ndimage as nd
 
-import const
-from const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS
-from const import BADMAG, BADVAL
-import utils
-from utils import bfield, bfields, load_infiles, verbose
-
-from ugali.utils.logger import logger
+from desqr import const
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, NSIDES, MINBANDS, MINEPOCHS
+from desqr.const import BADMAG, BADVAL
+from desqr import utils
+from desqr.utils import bfield, bfields, load_infiles, verbose
+from desqr.logger import logger
 
 ##################################################
 ################# Input columns #################$
@@ -47,7 +46,7 @@ MJD = ['MJD_OBS']
 
 # Composite of input columns
 BEST = MAGS + SPREAD + CLASS + FLAGS + EXPNUM + TEFF + IMAGE 
-INPUT_COLS = IDX + [BAND] + COORDS + MJD + BEST
+INPUT_COLS = IDX + COORDS + MJD + BEST
 
 ##################################################
 ################# Output columns #################
@@ -221,7 +220,7 @@ def coadd_coords(lon,lat,labels=None,index=None):
 
     # What about adding a dispersion?
 
-    return lon_out % 360.,lat_out
+    return lon_out % 360.0, lat_out
 
 @verbose
 def coadd_mjd(mjd,labels=None,index=None):
@@ -239,7 +238,7 @@ def coadd_mjd(mjd,labels=None,index=None):
     mjd    : median MJD (days)
     """
     if labels is None: 
-        labels = np.ones(len(lon),dtype=int)
+        labels = np.ones(len(mjd),dtype=int)
 
     if index is None: index = np.unique(labels)
 
@@ -247,7 +246,7 @@ def coadd_mjd(mjd,labels=None,index=None):
 
 @verbose
 def coadd_healpix(lon,lat,nsides=NSIDES,nest=True):
-    pix = [hp.ang2pix(nside,lon,lat,nest=nest,lonlat=True) for nside in NSIDES]
+    pix = [hp.ang2pix(nside,lon,lat,nest=nest,lonlat=True) for nside in nsides]
     return pix
 
 @verbose
@@ -360,7 +359,7 @@ def coadd_objects(data,bands=BANDS):
     # OBJECT_NUMBER has a different meaning (and type) in Y1A1 and Y2N.
     # Standardize it here (wouldn't be necessary if done on download).
     # ADW: Is this working properly?
-    if not keys.dtype['OBJECT_NUMBER'] is not np.dtype('>i8'):
+    if keys.dtype['OBJECT_NUMBER'] != np.dtype('>i8'):
         keys['OBJECT_NUMBER'] = keys['OBJECT_NUMBER'].astype('>i8')
 
     x = coadd_coords(data['RA'],data['DEC'],data[OBJECT_ID],index=unique_ids)
@@ -528,6 +527,15 @@ def quality_cuts(cat,key=None):
     nobjs = len(cat)
     sel = np.zeros(nobjs,dtype=bool)
 
+    # Objects with less than the minimum number of detections
+    columns = bfields(['NEPOCHS'],BANDS)
+    # Hard to supress this (should be gone in numpy >= 1.16)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        epochs = utils.unstructure(cat[columns])
+
+    sel |= (np.sum(epochs, axis=1) >= MINEPOCHS)
+
     # Objects with detections in the minimum number of bands.
     columns = bfields(['MAG_PSF'],BANDS)
     # Hard to supress this (should be gone in numpy >= 1.16)
@@ -535,8 +543,9 @@ def quality_cuts(cat,key=None):
         warnings.simplefilter("ignore")
         mags = utils.unstructure(cat[columns])
 
-    sel |= (np.sum(mags < BADMAG, axis=1) >= MINBANDS)
-    
+    sel &= (np.sum(mags < BADMAG, axis=1) >= MINBANDS)
+
+
     """
     # Objects with r,i,z
     mags = cat[bfields(['MAG_PSF','MAG_AUTO'],BANDS)].view(np.float).reshape((cat.size,-1))
@@ -564,7 +573,7 @@ def check_keys(cat,key):
     Check the number of non-unique objects against the number of
     measured magnitudes.
     """
-    nkey = (keys['UNIQUE_ID'] > 0).sum()
+    nkey = (key['UNIQUE_ID'] > 0).sum()
 
     columns = bfields(['MAG_PSF'],BANDS)
     mags = utils.unstructure(cat[columns])
@@ -587,20 +596,30 @@ if __name__ == "__main__":
     parser.add_argument('-f','--force',action='store_true')
     parser.add_argument('-v','--verbose',action='store_true')
     parser.add_argument('-b','--bands',default=None,action='append')
+    parser.add_argument('-m','--mlimit',default=None,type=float,
+                        help='memory limit (GB)')
     parser.add_argument('--min-bands',default=None,type=int)
+    parser.add_argument('--min-epochs',default=None,type=int)
     parser.add_argument('--ebv',default=None)
-    opts = parser.parse_args()
+    args = parser.parse_args()
 
-    if vars(opts).get('verbose'): logger.setLevel(logger.DEBUG)
-    if opts.bands: BANDS = opts.bands
-    if opts.min_bands: MINBANDS = opts.min_bands
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
-    if os.path.exists(opts.outfile) and not opts.force:
-        logger.warning("Found %s; skipping..."%opts.outfile)
+    if args.mlimit: 
+        logger.info("Setting memory limit: %.1fGB"%(args.mlimit))
+        soft,hard = set_memory_limit(args.mlimit*1024**3)
+        logger.info("Memory limit: %.1fGB"%(soft/1024.**3))
+
+    if args.bands: BANDS = args.bands
+    if args.min_bands: MINBANDS = args.min_bands
+    if args.min_epochs: MINEPOCHS = args.min_epochs
+
+    if args.outfile and os.path.exists(args.outfile) and not args.force:
+        logger.warning("Found %s; skipping..."%args.outfile)
         sys.exit()
 
-    logger.info("Loading files: %s"%opts.infiles)
-    data = load_infiles(opts.infiles,INPUT_COLS)
+    logger.info("Loading files: %s"%args.infiles)
+    data = load_infiles(args.infiles, INPUT_COLS)
     logger.info("All objects: %i"%len(data))
 
     good = good_objects(data)
@@ -613,17 +632,28 @@ if __name__ == "__main__":
     cat,key = coadd_objects(good,bands=BANDS)
     logger.info("Unique objects: %i"%len(cat))
 
-    cat = calculate_extinction(cat,bands=BANDS,ebvmap=opts.ebv)
+    cat = calculate_extinction(cat,bands=BANDS,ebvmap=args.ebv)
     cat = calculate_extended_class(cat,bands=BANDS)
  
     catalog,keys = quality_cuts(cat,key)
     check_keys(catalog,keys)
     logger.info("Quality objects: %i"%len(catalog))
 
-    if opts.outfile and len(catalog):
-        logger.info("Writing %s..."%opts.outfile)
-        utils.write(opts.outfile,catalog,force=opts.force)
+    # Don't write empty files
+    if len(catalog) == 0:
+        logger.info(f"No quality objects found; exiting...")
+        sys.exit(0)
 
-    if opts.keyfile and len(keys):
-        logger.info("Writing %s..."%opts.keyfile)
-        utils.write(opts.keyfile,keys,force=opts.force)
+    # Write the header
+    header = []
+    hdr = fitsio.read_header(args.infiles[0], ext=1)
+    for name in ['COORDSYS', 'ORDERING', 'NSIDE', 'HPX']:
+        header += [dict(name=name, value=hdr.get(name), comment=hdr.get_comment(name))]
+    
+    if args.outfile:
+        logger.info(f"Writing {len(catalog)} objects to {args.outfile}...")
+        utils.write(args.outfile,catalog,header=header,force=args.force)
+
+    if args.keyfile:
+        logger.info(f"Writing {len(keys)} keys to {args.keyfile}...")
+        utils.write(args.keyfile,keys,header=header,force=args.force)

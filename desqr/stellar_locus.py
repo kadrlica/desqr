@@ -1,22 +1,79 @@
-"""
-Run stellar locus regression validation.
-"""
-import glob
+#!/usr/bin/env python
+""" Run stellar locus regression validation. """
+import os, glob
 import datetime
-
+import yaml
 import warnings
 warnings.filterwarnings("ignore")
 
+import matplotlib
+if os.getenv('TERM').startswith('screen') or not os.getenv('DISPLAY'):
+    matplotlib.use('Agg')
+import pylab as plt
+
 import numpy as np
 import scipy.stats as scipyStats
-from scipy.stats import median_absolute_deviation
+from scipy.stats import median_abs_deviation
 import fitsio
 import healpy as hp
+import pandas as pd
 
-from desqr.utils import load_infiles
-from desqr.classify import bdf_extended_class
+from desqr import utils
+from desqr.utils import load_infiles, mkdir
+from desqr.utils import blank, bfield, bfields
+from desqr.classify import bdf_extended_class, wavg_extended_class
 from desqr.extinction import ebv, extinction
 from desqr.logger import logger
+from desqr.const import BANDS
+from desqr import plotting
+
+def load_slr_hpxmap(filename, param='wperp'):
+    """ Load healpix map from slr file. """
+    fits = fitsio.FITS(filename)
+    nside = fits[1].read_header()['NSIDE']
+    data = fits[1].read()
+
+    hpxmap = blank(nside)
+    hpxmap[data['pix']] = data[param]
+    hpxmap = utils.masked_array(hpxmap)
+    return hpxmap
+
+def plot_slr(filename,outfile=None,survey='delve',param='wperp'):
+    logger.info("Reading %s..."%filename)
+    
+    try:
+        hpxmap = hp.read_map(filename)
+    except ValueError:
+        hpxmap = load_slr_hpxmap(filename, param)
+    hpxmap = utils.masked_array(hpxmap)
+    hpxmap *= 1000 # mmag
+
+    cbar_kwargs = dict()
+    hpxmap_kwargs = dict(xsize=2000)
+    hist_kwargs = dict()
+
+    if param == 'wperp' or '_wperp_' in filename:    
+        label = 'slr wperp (mmag)'
+    elif param == 'slope' or '_slope_' in filename:
+        label = 'slr slope'
+    elif param == 'intercept' or '_intercept_' in filename:
+        label = 'slr intercept'
+    else: 
+        label = None
+
+    cbar_kwargs['label'] = label
+
+    fig,axes,smap = plotting.plot_hpxmap_hist(hpxmap,survey,cbar_kwargs,hpxmap_kwargs,
+                                              hist_kwargs)
+    #axes[0].annotate('%s band'%band, (0.05,0.93), xycoords='axes fraction')
+    axes[1].set_xlabel(label)
+
+    utils.print_statistics(hpxmap, unit='mmag')
+
+    if outfile is None: 
+        outfile=os.path.basename(filename).split('.')[0]+'.png'
+    logger.info("Writing %s..."%outfile)
+    plt.savefig(outfile,bbox_inches='tight')
 
 # Everything below this is copied directly from pipe_analysis/utils.py.
 # Should we move all those functions here once pipe_analysis is rewritten?
@@ -226,13 +283,14 @@ def calcWperp(gmags,rmags,imags,gr,ri):
     except:
            return np.nan
     if len(p2) >= 10:
-        wperp=median_absolute_deviation(p2)
+        #wperp=median_absolute_deviation(p2)
+        wperp=median_abs_deviation(p2, scale='normal')
         return wperp
     else:
         #print("here2")
         return np.nan
 
-def filter_catalog(catalog, mag_base="MAG_PSF_{}"):
+def filter_catalog(catalog, mag_base="MAG_PSF"):
     # maglims set from https://cdcvs.fnal.gov/redmine/projects/des-y3/wiki/Y3A2_Empirical_Stellar_Locus
     # could try a brighter faint cut also want to use "WAVG_MAG_PSF_%s"
     
@@ -241,19 +299,24 @@ def filter_catalog(catalog, mag_base="MAG_PSF_{}"):
     bands=["g","r","i"]
     colors = [['g', 'r'],
               ['r', 'i']]
+
+    try:
+        extclass = bdf_extended_class(catalog)
+    except:
+        extclass = wavg_extended_class(catalog['WAVG_SPREAD_MODEL_G'], catalog['WAVG_SPREADERR_MODEL_G'])
+
+    initialSel =  extclass == 0
+    initialSel &= (catalog[bfield(mag_base,"G")] > 16) & (catalog[bfield(mag_base,"G")] < 22) 
+    initialSel &= (catalog[bfield(mag_base,"R")] > 16) & (catalog[bfield(mag_base,"R")] < 21) 
+    initialSel &= (catalog[bfield(mag_base,"I")] > 16) & (catalog[bfield(mag_base,"I")] < 21)
     
-    initialSel= (bdf_extended_class(catalog)==0)
-    initialSel &= (catalog[mag_base.format("G")] > 16) & (catalog[mag_base.format("G")] < 22) 
-    initialSel &= (catalog[mag_base.format("R")] > 16) & (catalog[mag_base.format("R")] < 21) 
-    initialSel &= (catalog[mag_base.format("I")] > 16) & (catalog[mag_base.format("I")] < 21)
-    
-    catalog=catalog[initialSel].copy()
-    sfd_path="/home/s1/pferguso/projects/delve/calib/dr3_coadd_validation/tile_slr/data/lambda_sfd_ebv.fits"
-    ebvval = ebv(catalog["RA"],catalog["DEC"],sfd_path)
-    
+    catalog = catalog[initialSel].copy()
+    sfd_path = config['ebv']
+    ebvval = ebv(catalog["RA"], catalog["DEC"], sfd_path)
+
     for band in bands:
         extval=extinction(ebvval,band.lower())
-        magDict[band]=catalog[mag_base.format(band.upper())] - extval
+        magDict[band]=catalog[bfield(mag_base,band)] - extval
         
     for color in colors:
         colorDict[color[0]+color[1]]=magDict[color[0]]-magDict[color[1]]
@@ -267,7 +330,7 @@ def calcWAndLine(gmags,rmags,imags,gr,ri):
     except:
            return np.nan,np.nan,np.nan, np.nan
     if len(p2) >= 10:
-        wperp=median_absolute_deviation(p2)
+        wperp=median_abs_deviation(p2, scale='normal')
         return wperp, slope, intercept, len(p2)
     else:
         return np.nan,np.nan,np.nan, len(p2)
@@ -275,33 +338,29 @@ def calcWAndLine(gmags,rmags,imags,gr,ri):
     
 def apply_calcWAndLine(args):
     infile,bands,colors,nside = args
-    
-    data = load_infiles(infile, columns=INCOLS)
-   
+    logger.info(f"Loading {infile}...")
+    data = load_infiles(infile, columns=COLUMNS)
     
     catpix=hp.ang2pix(nside,data["RA"],data["DEC"], lonlat=True)
     
     cat,magDict,colorDict,mask=filter_catalog(data, mag_base=mag_base)
     
-    
     pix_unique = np.unique(catpix)
     ncols=5
-    
+
     if len(cat) < 1:
         out_arr=np.ones((ncols,len(pix_unique)))
         out_arr[0,:]=pix_unique
         out_arr[1,:]=np.unique(catpix, return_counts=True)[1]
         out_arr[2:,:]=np.nan
         return out_arr
-
     
-    wPerpVals= []
-    slopeVals= []
-    interceptVals= []
-    catlenVals=[]
+    wPerpVals = []
+    slopeVals = []
+    interceptVals = []
+    catlenVals = []
     
     catpix=catpix[mask]
-    
     
     for pix in pix_unique:
         sel=(catpix==pix)
@@ -319,7 +378,6 @@ def apply_calcWAndLine(args):
             interceptVals.append(np.nan)
             catlenVals.append(sel.sum())
             
-
     out_arr=np.ones((ncols,len(pix_unique)))
     out_arr[0,:]=pix_unique
     out_arr[1,:]=catlenVals
@@ -328,7 +386,7 @@ def apply_calcWAndLine(args):
     out_arr[4,:]=interceptVals
     return out_arr
 
-def calcWAndLine_files(infiles,bands,colors,nside,multiproc=False):
+def calcWAndLine_files(infiles,bands,colors,nside,processes=1):
     """ Load multiple input files.
     
     Parameters:
@@ -336,27 +394,17 @@ def calcWAndLine_files(infiles,bands,colors,nside,multiproc=False):
     infiles   : list of input fits files
     distmods : array of distance moduli to step through
     iso_func : interpolated isochrone
-    multiproc : number of cores to execute on
+    processes : number of cores to execute on
     
     Returns:
     --------
     data : return numpy array 
     """
-    if isinstance(infiles,str):
-        infiles = [infiles]
+    infiles = np.atleast_1d(infiles)
+    logger.debug("Loading {len(infiles)} files...")
 
-    logger.debug("Loading %s files..."%len(infiles))
-    
-    N = len(infiles)
-    args = list(zip(infiles,N*[bands],N*[colors],N*[nside]))
-
-    if multiproc:
-        from multiprocessing import Pool
-        processes = multiproc if multiproc > 0 else None
-        p = Pool(processes,maxtasksperchild=1)
-        out = p.map(apply_calcWAndLine,args)
-    else:
-        out = [apply_calcWAndLine(arg) for arg in args]
+    arglist = [ ((f, bands, colors, nside), ) for f in infiles]
+    out = utils.multiproc(apply_calcWAndLine, arglist, processes=processes)
     
     out=np.hstack(out)
     #check for duplicates
@@ -364,47 +412,102 @@ def calcWAndLine_files(infiles,bands,colors,nside,multiproc=False):
     
     if (s[1:] == s[:-1]).sum() > 0:
         print((s[1:] == s[:-1]).sum())
-        logger.warning("Duplicated healpix in index.")
-        import pdb; pdb.set_trace()
+        msg = "Duplicated healpix in index."
+        raise Exception(msg)
+
+    out = pd.DataFrame({
+        'pix':       out[0].astype(int),
+        'nobjects':  out[1].astype(int),
+        'wperp':     out[2],
+        'slope':     out[3],
+        'intercept': out[4],
+    })
     return out
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-m','--mag_base', help='type of mag',choices=["best","wavg","bdf"], default="best")
+    parser.add_argument('configfile',help='configuration file')
+    parser.add_argument('-t','--type', dest='mag_base',
+                        choices=["best","wavg","mag_psf", "mag_bdf"], default="best",
+                        help='type of mag',)
     parser.add_argument('-n','--nside', help='nside', default=128, type=int)
-    parser.add_argument('-o','--outfile', help='output file', default="../data/DR3_1_1_wAndLine_{}ns_{}.fits")
+    parser.add_argument('--nproc', default=20, type=int)
+    parser.add_argument('-o','--outbase',default='slr')
+    parser.add_argument('-p','--pix',default=None,type=int,action='append')
+    parser.add_argument('-v','--verbose',action='store_true')
     args = parser.parse_args()
 
-    INCOLS=["RA","DEC"]
-    bands=["g","r","i"]
+    if args.verbose: logger.setLevel(logger.DEBUG)
+
+    config = yaml.safe_load(open(args.configfile))
+    NSIDE = config['nside']
+    survey = config.get('survey')
+    catbase = config['catbase']
+    catdir = config['catdir']
+    filebase = os.path.join(catdir,catbase)
+
+    outdir = mkdir('release/slr')
+
+    nside=args.nside
+    logger.info(f"nside: {nside}")
+
+    if args.mag_base=="best":
+        mag_base="MAG_PSF"
+    elif args.mag_base=="wavg":
+        mag_base="WAVG_MAG_PSF"
+    elif args.mag_base=="psf_mag":
+        mag_base="PSF_MAG"
+    elif args.mag_base=="bdf_mag":
+        mag_base="BDF_MAG"
+    logger.info(f"mag: {mag_base}")
+
+    bands = ["g","r","i"]
     colors = [['g', 'r'],
               ['r', 'i']]
-    nside=args.nside
-    print("nside  {}".format(nside)) 
-    if args.mag_base=="best":
-        mag_base="PSF_MAG_{}"
-    elif args.mag_base=="wavg":
-        mag_base="WAVG_MAG_PSF_{}"
-    elif args.mag_base=="bdf":
-        mag_base="BDF_MAG_{}"
-    print(mag_base)
-    for band in bands:
-        INCOLS.append(mag_base.format(band.upper()))
 
-    INCOLS.append('BDF_S2N')
-    INCOLS.append('BDF_T')
+    COLUMNS = ["RA","DEC"]
+    COLUMNS += bfields(mag_base, bands)
+    COLUMNS += ['WAVG_SPREAD_MODEL_G', 'WAVG_SPREADERR_MODEL_G']
 
-    dirname='./catalog/'
+    if args.pix is not None:
+        pixels = args.pix
+    else:
+        pixels = np.arange(hp.nside2npix(NSIDE))
 
-    print(dirname)
-    filenames = sorted(glob.glob(dirname + '/*.fits'))
-    print("starting: {} files".format(len(filenames)))
+    if len(pixels) == 0:
+        msg = "Invalid pixel: %s"%args.pix
+        raise Exception(msg)
+     
+    #filenames = sorted(glob.glob(f'{catdir}/*.fits'))
+    filenames = [filebase%p for p in pixels]
+    filenames = [f for f in filenames if os.path.exists(f)]
+    # This LMC hpx failed
+    filenames = [f for f in filenames if not f.endswith('_11759.fits')]
+    logger.info(f"Running {len(filenames)} files...")
           
-    out=calcWAndLine_files(np.array(filenames), bands, colors, nside, multiproc=20)
-    #print(out)
-    baseout=mag_base.replace("{}","").lower()
-    outfile="../data/DR3_1_1_wAndLine_{}ns_{}.fits".format(baseout,nside)
-    print(outfile)
-    fitsio.write(outfile, out, clobber=True)
+    out=calcWAndLine_files(filenames, bands, colors, nside, processes=args.nproc)
+
+    outbase = args.outbase + f"_all_{args.mag_base}_n{nside}.fits.gz"
+    filename = os.path.join(outdir, outbase)
+    logger.info(f"Writing {filename}...")
+    fitsio.write(filename, out.to_records(index=False),
+                 header={'NSIDE':nside}, clobber=True)
+
+    for param in ['wperp']:
+        hpxmap = load_slr_hpxmap(filename, param)
+        outbase = args.outbase + f"_{param}_{args.mag_base}_n{nside}.fits.gz"
+        outfile = os.path.join(outdir, outbase)
+
+        logger.info(f"Writing {outfile}...")
+        hp.write_map(outfile,hpxmap,overwrite=True)
+
+        print(f"Global SLR {param}:")
+        utils.print_statistics(hpxmap*1000, q=[5,50,95])
+
+        print("Plotting %s..."%outfile)
+        pngfile = outfile.replace('.fits.gz','.png')
+        plot_slr(outfile,pngfile,survey=survey)
+        plt.ion()
+

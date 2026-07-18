@@ -3,17 +3,17 @@ import os
 import subprocess
 import time
 import sys
-import logging
 
-logging.basicConfig(stream=sys.stdout,format='%(message)s')
+#import logging
+#logging.basicConfig(stream=sys.stdout,format='%(message)s')
 
 import easyaccess as ea
 import yaml
 
-from ugali.utils.logger import logger
-from utils import mkscratch, bfields
-from const import BANDS, OBJECT_ID, UNIQUE_ID
-from download import create_bitmap_index
+from desqr.logger import logger
+from desqr.utils import mkscratch, bfields
+from desqr.const import BANDS, OBJECT_ID, UNIQUE_ID
+from desqr.download import create_bitmap_index
 
 if __name__ == "__main__":
     import argparse
@@ -25,9 +25,8 @@ if __name__ == "__main__":
     parser.add_argument('-d','--dryrun',action='store_true')
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-    
+    if args.verbose: logger.setLevel(logger.DEBUG)
+
     config = yaml.load(open(args.config))
     section = config['db']
     data = yaml.load(open(config['dbtables']))

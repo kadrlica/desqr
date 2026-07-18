@@ -1,20 +1,16 @@
 #!/usr/bin/env python
-import os
-import subprocess
-import time
-import sys
-import logging
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s',
-                    datefmt='%Y-%m-%d %I:%M:%S %p', stream=sys.stdout)
+import os, sys
+import yaml
+#import logging
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s',
+#                    datefmt='%Y-%m-%d %I:%M:%S %p', stream=sys.stdout)
 
 import easyaccess as ea
-import yaml
 
-from ugali.utils.logger import logger
-from utils import mkscratch, bfields
-from const import BANDS, OBJECT_ID, UNIQUE_ID
-from download import create_bitmap_index
+from desqr.logger import logger
+from desqr.utils import mkscratch, bfields
+from desqr.const import BANDS, OBJECT_ID, UNIQUE_ID
+from desqr.download import create_bitmap_index
 
 QUERY = dict(
     BTX='create index {index} on {table}({column})',
@@ -27,9 +23,6 @@ INDEX = dict(
     BMX='{idxname}_{column}_BMX',
     PK ='{idxname}_PK',
 )
-
-import logging
-
 
 def drop_index(cursor, index):
     query = "DROP INDEX %s"%(index)
@@ -49,8 +42,7 @@ if __name__ == "__main__":
     parser.add_argument('-d','--dryrun',action='store_true')
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    if args.verbose: logger.setLevel(logger.DEBUG)
 
     config = yaml.load(open(args.config))
     section = config['db']
@@ -64,7 +56,7 @@ if __name__ == "__main__":
     for table in tables:
         if args.table and (table not in args.table): continue
 
-        logging.debug(table)
+        logger.debug(table)
         idxname = data[table].get('idxname',table.split('_')[0])
 
         params = dict(idxname=idxname,table=table)
@@ -83,7 +75,7 @@ if __name__ == "__main__":
                 query = QUERY[idx] if idx in QUERY else idx
                 query = query.format(**params)
 
-                logging.debug(query)
+                logger.debug(query)
 
 
                 if not args.dryrun:
@@ -101,7 +93,7 @@ if __name__ == "__main__":
             params.update(index=index)
             query = val['query'].format(**params)
 
-            logging.debug(query)
+            logger.debug(query)
             if not args.dryrun:
                 if args.force:
                     drop_index(con.cursor(),index)

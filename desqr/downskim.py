@@ -48,12 +48,17 @@ def get_dirname(expnum):
     """ Get base directory name """
     return expnum//100 * 100
 
-def get_filenames(expnum,path=None):
+def get_filenames(expnum, path=None):
     """ Get list of filenames """
     dirname = get_dirname(expnum)
     params = dict(expnum=expnum,dirname=dirname)
 
-    paths = [os.path.join(path,filebase)] if path is not None else PATHS
+    if os.path.isfile(path):
+        paths = [path]
+    elif path is not None:
+        paths = [os.path.join(path,filebase)]
+    else:
+        paths = PATHS
 
     for path in paths:
         filenames = glob.glob(path.format(**params))

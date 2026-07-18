@@ -10,10 +10,10 @@ import glob
 import numpy as np
 import pandas as pd
 
-from utils import mkdir, found, is_found
+from desqr.utils import mkdir, found, is_found
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     parser.add_argument('--copy', action='store_true')
     args = parser.parse_args()

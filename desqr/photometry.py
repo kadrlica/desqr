@@ -4,13 +4,12 @@ Characterize photometric scatter.
 """
 __author__ = "Alex Drlica-Wagner"
 import os
-from os.path import join
 import glob
 import yaml
 from collections import OrderedDict as odict
 
 import matplotlib
-if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
+if os.getenv('TERM').startswith('screen') or not os.getenv('DISPLAY'):
     matplotlib.use('Agg')
 import pylab as plt
 
@@ -23,51 +22,70 @@ import fitsio
 from ugali.utils.healpix import ang2pix, pix2ang
 import ugali.utils.projector
 from ugali.utils.projector import angsep
-from ugali.utils.shell import mkdir
-from ugali.utils.logger import logger
 
-import utils
-from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG
-from utils import bfield, bfields, load_infiles
-from utils import blank, rec_append_fields
-from match import match_query
+from desqr import utils
+from desqr.utils import bfield, bfields, load_infiles
+from desqr.utils import blank, rec_append_fields
+from desqr.utils import mkdir
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG
+from desqr.match import match_query
+from desqr.logger import logger
+from desqr import plotting
+from desqr.catalog import good_objects
 
-import plotting
-from catalog import good_objects
-
-TYPES = ['gaia','gaia_dr2','gaia_edr3','des','des_dr2','hpx_rms','wavg_rms']
+NSIDE = 32
+TYPES = ['gaia','gaia_dr2','gaia_edr3','gaia_dr3',
+         'des', 'des_dr2', 'des_y6',
+         'delve_dr2', 'delve_dr3',
+         'hpx_rms','wavg_rms']
 COLUMNS = [OBJECT_ID,'RA','DEC']
 GAIA_DIR = {
-    'dr2':'/data/des40.b/data/gaia/dr2/healpix/',
-    'edr3':'/data/des40.b/data/gaia/edr3/healpix/',
+    'dr2':'/data/delve01.b/data/gaia/dr2/healpix/',
+    'edr3':'/data/delve01.b/data/gaia/edr3/healpix/',
+    'dr3':'/data/delve01.b/data/gaia/dr3/healpix/',    
 }
 
-DES_BASE = {
-    'dr2':'/data/des40.b/data/des/dr2/healpix/dr2_main_%05d.fits',
+COADD_BASE = {
+    #'des_dr2':'/data/des40.b/data/des/dr2/healpix/dr2_main_%05d.fits',
+    'des_y6': '/data/delve01.b/data/des/y6a2/gold/2.2/healpix/y6_gold_2_2_%05d.fits',
+    'delve_dr2':'/data/delve01.b/data/delve/dr2/cat/cat_hpx_%05d.fits',
+    'delve_dr3':'/data/delve01.b/data/delve/dr3/gold/v1.0/healpix/dr3_gold_%05d.fits',
 }
 
 def plot_photometry(filename,outfile=None,survey='delve'):
     logger.info("Reading %s..."%filename)
-    hpxmap = hp.read_map(filename,verbose=False)
+    hpxmap = hp.read_map(filename)
+    hpxmap = utils.masked_array(hpxmap)
     hpxmap *= 1000 # mmag
 
     cbar_kwargs = dict()
     hpxmap_kwargs = dict(xsize=2000)
-    hist_kwargs = dict()
+    hist_kwargs = dict(stats=True)
 
     if '_rms_' in filename:    
         label = 'MAG RMS (mmag)'
     elif '_gaia_' in filename: 
         label = r'$\Delta$(Gaia G) (mmag)'
-        hpxmap_kwargs['vmin'] = vmin = -30
-        hpxmap_kwargs['vmax'] = vmax = 30
+        hpxmap_kwargs['vmin'] = vmin = -15
+        hpxmap_kwargs['vmax'] = vmax = 15
         hist_kwargs['bins'] = np.linspace(vmin,vmax)
-    elif '_des_' in filename:  
+    elif '_des_dr2_' in filename:  # This is when using FGCM v2.1 (from MAG_APER) 
         label = r'$\Delta$(DES) (mmag)'
         hpxmap_kwargs['vmin'] = vmin = -0.05
         hpxmap_kwargs['vmax'] = vmax = 0.05
         hist_kwargs['bins'] = np.linspace(vmin,vmax)
         survey='des'
+    elif '_des_y6_' in filename:  # This is when using FGCM v3.1 (from MAG_PSF)
+        label = r'$\Delta$(DES) (mmag)'
+        hpxmap_kwargs['vmin'] = vmin = -3.0
+        hpxmap_kwargs['vmax'] = vmax = 3.0
+        hist_kwargs['bins'] = np.linspace(vmin,vmax)
+        survey='des'
+    elif '_delve_' in filename:  
+        label = r'$\Delta$(DELVE) (mmag)'
+        hpxmap_kwargs['vmin'] = vmin = -3.0
+        hpxmap_kwargs['vmax'] = vmax = 3.0
+        hist_kwargs['bins'] = np.linspace(vmin,vmax)
     else: 
         label = None
 
@@ -78,16 +96,14 @@ def plot_photometry(filename,outfile=None,survey='delve'):
     #axes[0].annotate('%s band'%band, (0.05,0.93), xycoords='axes fraction')
     axes[1].set_xlabel(label)
 
-    utils.print_statistics(hpxmap)
-
     if outfile is None: 
         outfile=os.path.basename(filename).split('.')[0]+'.png'
     logger.info("Writing %s..."%outfile)
     plt.savefig(outfile,bbox_inches='tight')
 
-def get_des_catalog(hpx,columns=['RA','DEC','WAVG_MAG_PSF_G'],version='dr2'):
-    """ Grab DES catalogs """
-    basename = DES_BASE[version]
+def get_coadd_catalog(hpx,columns=['RA','DEC','WAVG_MAG_PSF_G'],version='des_dr2'):
+    """ Grab coadd catalogs """
+    basename = COADD_BASE[version]
 
     pixels = [hpx]
     filenames = [basename%p for p in pixels]
@@ -95,6 +111,7 @@ def get_des_catalog(hpx,columns=['RA','DEC','WAVG_MAG_PSF_G'],version='dr2'):
     if len(filenames):
         cat = load_infiles(filenames,columns=columns)
     else:
+        print(f"WARNING: Missing catalog for {hpx}; skipping...")
         cat = None
     return cat
 
@@ -108,15 +125,19 @@ def get_gaia_catalog(hpx,columns=['RA','DEC','PHOT_G_MEAN_FLUX'],version='dr2'):
     cat = load_infiles(filenames,columns=columns)
 
     # Need to put the Gaia flux onto the AB system
-    if version == 'edr3':
+    if version in ('edr3', 'dr3'):
         #https://www.cosmos.esa.int/web/gaia/edr3-passbands
         gzp_g = 25.8010446445
-    elif version == 'dr2':
+    elif version in ('dr2'):
         # For magnitudes published in Gaia DR2
         #https://www.cosmos.esa.int/web/gaia/iow_20180316
         gzp_g = 25.7933969562 
-
-    mag_G = gzp_g - 2.5*np.log10(cat['PHOT_G_MEAN_FLUX'])
+    else:
+        msg = "Undefined Gaia zeropoint"
+        raise Exception(msg)
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mag_G = gzp_g - 2.5*np.log10(cat['PHOT_G_MEAN_FLUX'])
 
     cat = rec_append_fields(cat,'PHOT_G_MEAN_MAG_AB',mag_G)
     return cat
@@ -178,13 +199,13 @@ def gaia_transform(g, r, i, z, version='dr2'):
     fnuPrime[:, 2] = fudgeFactors[2] * (S[:, 1] + S[:, 2]) / 2.0
     fnuPrime[:, 3] = S[:, 2] + fudgeFactors[3] * ((lambdaStd[3] - lambdaStd[2]) / (lambdaStd[3] - lambdaStd[1])) * (S[:, 2] - S[:, 1])
 
-    if version=='dr2':
+    if version in ('dr2'):
         # DR2 fit parameters
         pars = [ 1.43223290e+00,  1.50877061e+00, 8.43173013e-01, -5.99023967e-04, 
                  4.06188382e-01,  3.11181978e-01, 2.51002598e-01,  1.00000000e-05,  
                  4.94284725e-03,  1.80499806e-03]
 
-    elif version=='edr3':
+    elif version in ('edr3', 'dr3'):
         # EDR3: Notice that the last two parameters (describing the
         # r-offset curvature due to background issues) are much smaller.
         pars = [ 2.61815727e+00,  2.69372875e+00,  1.45644592e+00, -5.99023051e-04,
@@ -193,7 +214,8 @@ def gaia_transform(g, r, i, z, version='dr2'):
 
         fudgeShift = 2.4e-3 # Additive shift in peak (mag)
     else:
-        raise Exception("Unrecognized Gaia version: %s"%version)
+        msg = "Unrecognized Gaia version: %s"%version
+        raise Exception(msg)
 
     i10g,i10r,i10i,i10z = pars[0:4]
     kg,kr,ki,kz = pars[4:8]
@@ -214,7 +236,7 @@ def gaia_match(filename,version='edr3',verbose=True):
     Parameters
     ----------
     filename : catalog filename
-    version  : Gaia catalog version ['dr2', 'edr3']
+    version  : Gaia catalog version ['dr2', 'dr3']
 
     Returns
     -------
@@ -285,7 +307,7 @@ def gaia_match_fgcm(filename,version='edr3',verbose=True):
     Parameters
     ----------
     filename : catalog filename
-    version  : Gaia catalog version ['dr2', 'edr3']
+    version  : Gaia catalog version ['dr2', 'dr3']
 
     Returns
     -------
@@ -314,7 +336,7 @@ def gaia_match_fgcm(filename,version='edr3',verbose=True):
         msg = '%s (RA,DEC,RAD) = %.2f,%.2f,%.2f'%(os.path.basename(filename),ra,dec,radius)
         print(msg)
 
-    #print("Getting coadd catalog...")
+    #print("Getting Gaia catalog...")
     cat = load_infiles([filename],columns)
 
     # Switch ZPs
@@ -408,8 +430,8 @@ def gaia_photometry(filename,nside=64,band=None,plot=False,version='edr3'):
         
     return upix,stat
 
-def des_photometry(filename,nside=64,band=None,plot=False,version='dr2'):
-    """ Calculate the median spread between catalog and DES DR2.
+def coadd_photometry(filename,nside=64,band=None,plot=False,version='des_dr2'):
+    """ Calculate the median spread between catalog and coadd catalog.
 
     Parameters
     ----------
@@ -426,27 +448,27 @@ def des_photometry(filename,nside=64,band=None,plot=False,version='dr2'):
         msg = "Couldn't find %s"%filename
         raise Exception(msg)
 
-    #columns = [OBJECT_ID,'RA','DEC']
     columns = ['RA','DEC']
     spread,nepochs = bfields(['WAVG_SPREAD_MODEL','NEPOCHS'],band)
     mag = bfield('WAVG_MAG_PSF',band)
+    #mag = bfield('MAG_PSF',band)
     columns += [spread, nepochs, mag]
 
     # Hack to get pixel location
-    hpx = int(filename.split('_')[-1].split('.')[0])
-    ra,dec = hp.pix2ang(NSIDE, hpx, lonlat=True)
-    radius = np.degrees(hp.max_pixrad(NSIDE))
+    hdr = fitsio.read_header(filename,ext=1)
+    hpx = int(hdr['HPX'])
+    ra,dec = hp.pix2ang(hdr['NSIDE'], hpx, lonlat=True)
+    msg = '%s (RA,DEC) = %.2f,%.2f'%(os.path.basename(filename),ra,dec)
+    logger.info(msg)
 
-    msg = '%s (RA,DEC,RAD) = %.2f,%.2f,%.2f'%(os.path.basename(filename),ra,dec,radius)
-    print(msg)
-
-    # Load the DES catalog
-    ext = get_des_catalog(hpx,version=version,columns=columns)
+    # Load the coadd catalog
+    ext = get_coadd_catalog(hpx,version=version,columns=columns)
     if ext is None:
-        msg = "WARNING: No DES objects in pixel: %s"%hpx
-        print(msg)
+        msg = "WARNING: No coadd objects in pixel: %s"%hpx
+        logger.warning(msg)
         return np.array([],dtype=int), np.array([])
 
+    
     # Select stars with 16 < mag < 20
     sel = (np.fabs(ext[spread])<0.002) & \
           (ext[mag]>16) & (ext[mag]<20) & \
@@ -454,8 +476,8 @@ def des_photometry(filename,nside=64,band=None,plot=False,version='dr2'):
     ext = ext[sel]
 
     if len(ext) == 0:
-        msg = "WARNING: No DES objects passing selection in pixel: %s"%hpx
-        print(msg)
+        msg = "WARNING: No coadd objects passing selection in pixel: %s"%hpx
+        logger.warning(msg)
         return np.array([],dtype=int), np.array([])
 
     # Load the test catalog
@@ -469,7 +491,7 @@ def des_photometry(filename,nside=64,band=None,plot=False,version='dr2'):
 
     if len(cat) == 0:
         msg = "WARNING: No objects passing selection in: %s"%filename
-        print(msg)
+        logger.warning(msg)
         return np.array([],dtype=int), np.array([])
 
     m = match_query(cat['RA'],cat['DEC'],ext['RA'],ext['DEC'])
@@ -486,13 +508,12 @@ def des_photometry(filename,nside=64,band=None,plot=False,version='dr2'):
     upix = np.unique(pix)
     stat = nd.median(diff,labels=pix,index=upix)
 
-    if False:
+    if plot:
         plt.figure()
         plt.hist(diff)
         import pdb; pdb.set_trace()
         
     return upix,stat
-
 
 def wavg_rms_photometry(filename,nside=64,band=None,plot=False):
     """ Calculate the median WAVG_MAGRMS in pixels. 
@@ -531,7 +552,7 @@ def wavg_rms_photometry(filename,nside=64,band=None,plot=False):
     # Select stars with 16 < r < 18
     #(cat[mag] > 16) & (cat[mag] < 18) &\
     sel = (np.fabs(cat[spread]) < 0.002) & \
-          (cat[mag] > 16) & (cat[mag] < 17) &\
+          (cat[mag] > 16) & (cat[mag] < 18) &\
           (cat[magrms] < 90) &\
           (cat[nepochs] > 1)
     cat = cat[sel]
@@ -577,10 +598,9 @@ def hpx_rms_photometry(filename,nside=64,band=None,plot=False):
 
     # Hack to get pixel location
     hpx = int(filename.split('_')[-1].split('.')[0])
-    #hpx = ang2pix(NSIDE, cat['RA'], cat['DEC'])
     ra,dec = hp.pix2ang(NSIDE, hpx, lonlat=True)
     msg = '%s (RA,DEC) = %.2f,%.2f'%(os.path.basename(filename),ra,dec)
-    print(msg)
+    logger.info(msg)
 
     cat = load_infiles([filename],columns)
 
@@ -590,15 +610,15 @@ def hpx_rms_photometry(filename,nside=64,band=None,plot=False):
     cat = cat[sel]
 
     if len(cat) == 0:
-        msg = "WARNING: No objects passing selection in: %s"%filename
-        print(msg)
+        msg = "No objects passing selection in: %s"%filename
+        logger.warning(msg)
         return np.array([],dtype=int), np.array([])
 
     # Calculate "per object" quantities
-    df = pd.DataFrame(cat.byteswap().newbyteorder())
+    df = pd.DataFrame(cat)
     grp = df.groupby(objid)
-    ra = grp['RA'].median()
-    dec = grp['DEC'].median()
+    ra = grp['RA'].first()
+    dec = grp['DEC'].first()
     cts = grp[mag].count()
     rms = grp[mag].std()
 
@@ -617,58 +637,66 @@ if __name__ == "__main__":
     import argparse
     description = __doc__
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('config',help='configuration file')
+    parser.add_argument('configfile',help='configuration file')
     parser.add_argument('-b','--band',default='r',choices=BANDS+['griz'])
     parser.add_argument('-n','--nside',default=128,type=int)
     parser.add_argument('-o','--outbase',default='photo')
     parser.add_argument('-p','--pix',default=None,type=int,action='append')
     parser.add_argument('-v','--verbose',action='store_true')
-    parser.add_argument('--type',choices=TYPES,default='gaia_edr3')
+    parser.add_argument('--type', choices=TYPES, default='gaia_edr3')
     parser.add_argument('--nproc',default=4,type=int)
     args = parser.parse_args()
 
-    print('Calculating photometric offsets...')
+    if args.verbose: logger.setLevel(logger.DEBUG)
+
+    logger.info('Calculating photometric offsets...')
     band = args.band
 
-    config = yaml.safe_load(open(args.config))
+    config = yaml.safe_load(open(args.configfile))
     OBJECT_ID = config.get('objid',OBJECT_ID)
     NSIDE = config['nside']
+    survey = config.get('survey')
     catdir  = config['catdir']
     catbase = config['catbase']
     filebase = os.path.join(catdir,catbase)
 
     # Output nside
     nside = args.nside
-    #outdir = mkdir('release/photometry')
-    outdir  = './'
+    outdir = mkdir('release/photometry')
+    #outdir  = './'
     outbase = args.outbase
 
     kwargs = dict(nside=args.nside,band=band)
-    if args.type in ('gaia','gaia_edr3'):
+    if args.type in ('gaia', 'gaia_dr3'):
+        func = gaia_photometry
+        kwargs['version'] = 'dr3'
+        outbase += '_gaia_%(version)s'%kwargs
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
+    elif args.type in ('gaia_edr3'):
         func = gaia_photometry
         kwargs['version'] = 'edr3'
         outbase += '_gaia_%(version)s'%kwargs
-        print("Calculating offsets to Gaia %(version)s..."%kwargs)
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
     elif args.type == 'gaia_dr2':
         func = gaia_photometry
         kwargs['version'] = 'dr2'
         outbase += '_gaia_%(version)s'%kwargs
-        print("Calculating offsets to Gaia %(version)s..."%kwargs)
-    elif args.type == 'des_dr2':
-        func = des_photometry
-        kwargs['version'] = 'dr2'
-        outbase += '_des_%(version)s_%(band)s'%kwargs
-        print("Calculating offsets to DES %(version)s..."%kwargs)
+        logger.info("Calculating offsets to Gaia %(version)s..."%kwargs)
+    elif args.type in ('des_dr2', 'des_y6', 'delve_dr2', 'delve_dr3'):
+        func = coadd_photometry
+        kwargs['version'] = args.type
+        outbase += '_%(version)s_%(band)s'%kwargs
+        logger.info("Calculating offsets to coadd %(version)s..."%kwargs)
     elif args.type == 'wavg_rms':
         func = wavg_rms_photometry
         outbase += '_%s_%s'%(args.type,band)
-        print("Calculating %s in %s band..."%(args.type,band))
+        logger.info("Calculating %s in %s band..."%(args.type,band))
     elif args.type == 'hpx_rms':
         filebase = os.path.join(config['hpxdir'],'{band:s}',config['hpxbase'])
         filebase = filebase.format(band=band)
         func = hpx_rms_photometry
         outbase += '_%s_%s'%(args.type,band)
-        print("Calculating %s in %s band..."%(args.type,band))
+        logger.info("Calculating %s in %s band..."%(args.type,band))
     else:
         msg = "Unrecognized type: %s"%args.type
         raise Exception(msg)
@@ -692,6 +720,8 @@ if __name__ == "__main__":
      
     filenames = [filebase%p for p in pixels]
     filenames = [f for f in filenames if os.path.exists(f)]
+    # This LMC hpx failed
+    filenames = [f for f in filenames if '11759' not in f]
 
     if not len(filenames):
         msg = "No valid files found."
@@ -700,7 +730,7 @@ if __name__ == "__main__":
     # Args must be tuple
     print("Processing %i files..."%len(filenames))
 
-    arglist = zip(filenames)
+    arglist = list(zip(filenames))
 
     results = utils.multiproc(func,arglist,kwargs,processes=args.nproc)
      
@@ -710,19 +740,17 @@ if __name__ == "__main__":
 
     for pix,stat in [r for r in results if r is not None]:
         hpxmap[pix] = stat
-     
-    hpxmap = np.ma.MaskedArray(hpxmap,np.isnan(hpxmap),fill_value=np.nan)
+
+    hpxmap = utils.masked_array(hpxmap)
 
     outfile = os.path.join(outdir,outbase+'_n%i.fits.gz'%nside)
     print("Writing %s..."%outfile)
     hp.write_map(outfile,hpxmap,overwrite=True)
 
-    q = [5,50,95]
-    p = np.percentile(hpxmap.compressed(),q)
     print("Global Photometric Percentiles:")
-    print('%s (%s%%)'%(p,q))
+    utils.print_statistics(1000*hpxmap, q=[5,50,95], unit='mmag')
 
     print("Plotting %s..."%outfile)
     pngfile = outfile.replace('.fits.gz','.png')
-    plot_photometry(outfile,pngfile)
+    plot_photometry(outfile,pngfile,survey=survey)
     plt.ion()

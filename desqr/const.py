@@ -8,6 +8,7 @@ BANDS = ['g','r','i','z','Y']
 #BANDS = ['g','r']
 #MINBANDS = 1
 MINBANDS = 2
+MINEPOCHS = 1
 COLORS = odict([('g','green'),('r','red'),('i','gold'),('z','purple'),('Y','gray')])
 BADMAG = 99.
 BADVAL = -1

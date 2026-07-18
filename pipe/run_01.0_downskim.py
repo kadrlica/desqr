@@ -8,11 +8,12 @@ import time
 import glob
 
 import numpy as np
-from utils import mkdir, found, is_found
-import download
+
+from desqr.utils import mkdir, found, is_found
+from desqr import download
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     args = parser.parse_args()
 

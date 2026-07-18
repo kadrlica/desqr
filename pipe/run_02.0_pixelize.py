@@ -13,7 +13,8 @@ import warnings
 import yaml
 import numpy as np
 import pandas as pd
-from utils import mkdir
+
+from desqr.utils import mkdir
 
 def make_paths(config, bands=None):
     """ Make lists of raw file paths """
@@ -50,7 +51,7 @@ def make_paths(config, bands=None):
     return paths
 
 if __name__ == "__main__":
-    from parser import Parser
+    from desqr.parser import Parser
     parser = Parser(description=__doc__)
     parser.set_defaults(njobs=None)
     args = parser.parse_args()

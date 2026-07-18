@@ -17,104 +17,70 @@ from mpl_toolkits.axisartist import Subplot
 from matplotlib.ticker import MaxNLocator
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-from ugali.utils.shell import mkdir
+from desqr import utils
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
+from desqr.utils import bfields, load_infiles, setdefaults, isstring
+from desqr.utils import mkdir, calc_statistics
 
-try:
-    from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
-    from desqr.utils import bfields, load_infiles, setdefaults, isstring
-except ModuleNotFoundError:
-    from .const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
-    from .utils import bfields, load_infiles, setdefaults, isstring
-
+viridis_w = plt.cm.viridis.copy()
+viridis_w.set_under('none')
+gray_w = plt.cm.gray.copy()
+gray_w.set_under('none')
+    
 def draw_peak(peak,**kwargs):
     kwargs.setdefault('ls','--')
-    kwargs.setdefault('label','%.1f '%(peak))
+    kwargs.setdefault('label',f'{peak:.1f}')
     ax = plt.gca()
     ax.axvline(peak,**kwargs)
 
-def draw_hist(hpxmap,**kwargs):
-    if isinstance(hpxmap,np.ma.MaskedArray):
-        pix = np.where(~hpxmap.mask)
-    else:
-        pix = np.where((np.isfinite(hpxmap)) & (hpxmap !=hp.UNSEEN))
-
-    data = hpxmap[pix]
-    kwargs.setdefault('bins',np.linspace(data.min(),data.max(),100))
-    kwargs.setdefault('histtype','step')
-    kwargs.setdefault('normed',True)
-    kwargs.setdefault('lw',1.5)
-
-    ax = plt.gca()
-    n,b,p = ax.hist(data,**kwargs)
-
-    ax2 = ax.twinx()
-    plt.hist(data,cumulative=-1,color='r',**kwargs)
-    ax2.set_ylabel('Cumulative', color='r')
-    for tl in ax2.get_yticklabels():
-        tl.set_color('r')
-    ax2.set_ylim(0,1)
-
-    plt.sca(ax)
-    quantiles = [5,50,95]
-    percentiles = np.percentile(data,quantiles)
-    for q,p in zip(quantiles,percentiles):
-        draw_peak(p,color='r',label='%.1f (%g%%)'%(p,100-q))
-
-    ax.set_xlim(kwargs['bins'].min(),kwargs['bins'].max())
-
-    return quantiles,percentiles
-
 def draw_peak_hist(hpxmap,**kwargs):
+    """ Draw the histogram and annotate peak. """
     ax = plt.gca()
 
-    if isinstance(hpxmap,np.ma.MaskedArray):
-        pix = np.where(~hpxmap.mask)
-    else:
-        pix = np.where((np.isfinite(hpxmap)) & (hpxmap != hp.UNSEEN))
-
-    data = hpxmap[pix]
-
-    vmin = kwargs.pop('vmin',np.percentile(data,q=0.1))
-    vmax = kwargs.pop('vmax',np.percentile(data,q=99.9))
+    data = utils.masked_array(hpxmap)
+    vmin,vmax = utils.calc_statistics(hpxmap, q=[0.1, 99.9])['p']
+    vmin = kwargs.pop('vmin', vmin)
+    vmax = kwargs.pop('vmax', vmax)
     nbins = kwargs.pop('nbins',100)
     defaults = dict(bins=np.linspace(vmin,vmax,nbins),
                     histtype='step',density=True,lw=1.5,
                     peak=False,quantiles=False,color='k')
     setdefaults(kwargs,defaults)
 
+    do_stats = kwargs.pop('stats')
     do_peak = kwargs.pop('peak')
     do_quantiles = kwargs.pop('quantiles')
-    do_overflow = kwargs.pop('overflow',False)
+    do_overflow = kwargs.pop('overflow',True)
     # Deal with bug: https://github.com/matplotlib/matplotlib/issues/6448/
     if do_overflow:
-        data = np.clip(data,kwargs['bins'].min(),kwargs['bins'].max())
+        data = np.clip(data, kwargs['bins'].min(), kwargs['bins'].max())
     else:
-        data = data[(data > kwargs['bins'].min())&(data < kwargs['bins'].max())]
+        data = data[(data > kwargs['bins'].min()) & (data < kwargs['bins'].max())]
 
-    n,b,p = ax.hist(data,**kwargs)
+    # Plot the histogram
+    ax.hist(data.compressed(), **kwargs)
 
-    ret = dict()
-    peak = ((b[1:]+b[:-1])/2.)[np.argmax(n)]
-    ret['peak'] = peak
+    # Calculate statistics on the histogram
+    stats = utils.calc_statistics(data, q=[5,16,50,84,95], bins=kwargs['bins'])
+
     if do_peak:
-        draw_peak(peak,color='k',label='%.1f'%(peak))
-
-    ret['mean'] = np.mean(data)
-    ret['std']  = np.std(data)
-
-    quantiles = [5,16,50,84,95]
-    percentiles = np.percentile(data,quantiles)
-    ret['quantiles']   = quantiles
-    ret['percentiles'] = percentiles
-    for p,q in zip(percentiles,quantiles):
-        ret['q%02d'%q] = p
-
+        draw_peak(stats['peak'], color='k', label=f"{stats['peak']:.1f}")
+        
     if do_quantiles:
-        for q,p in zip(quantiles,percentiles):
-            draw_peak(p,color='r',label='%.1f (%g%%)'%(p,100-q))
+        for q, p in zip(stats['q'], stats['p']):
+            draw_peak(p, color='gray', ls=':', label=f'{p:.1f} ({100-q:g}%)')
 
-    ax.set_xlim(kwargs['bins'].min(),kwargs['bins'].max())
-    return ret
+    if do_stats:
+        text = ""
+        for s in ['peak', 'mean', 'median', 'std', 's68']:
+            text += f"{s}: {stats[s]:.1f}\n"
+        ax.annotate(text.rstrip(), (0.7,0.95), xycoords='axes fraction',
+                    fontsize=8, ha='left', va='top')
+            
+    if not np.isnan(kwargs['bins']).all():
+        ax.set_xlim(np.nanmin(kwargs['bins']),np.nanmax(kwargs['bins']))
+        
+    return stats
 
 def create_hpxmap_hist_figure():
     #fig = plt.figure(figsize=(10.5,3.8))
@@ -157,7 +123,7 @@ def plot_hpxmap_hist(hpxmap,survey=None,
     fig.add_subplot(ax1)
     plt.sca(ax1)
 
-    smap,im = draw_survey(hpxmap,survey,**hpxmap_kwargs)
+    smap,im = draw_survey(hpxmap, survey, **hpxmap_kwargs)
     smap.draw_inset_colorbar(**cbar_kwargs)
     smap.draw_milky_way()
 
@@ -170,7 +136,7 @@ def plot_hpxmap_hist(hpxmap,survey=None,
     ax2 = Subplot(fig,gridspec[2])
     fig.add_subplot(ax2)
     plt.sca(ax2)
-    ret = draw_peak_hist(hpxmap,**hist_kwargs)
+    stats = draw_peak_hist(hpxmap,**hist_kwargs)
     ax2.yaxis.set_major_locator(MaxNLocator(6,prune='both'))
     ax2.xaxis.set_major_locator(MaxNLocator(5))
     ax2.axis['left'].major_ticklabels.set_visible(False)
@@ -242,7 +208,7 @@ def draw_maglites(hpxmap,**kwargs):
     from skymap.survey import MaglitesSkymap
     smap = MaglitesSkymap()
     smap.draw_maglites()
-    return smap,smap.draw_hpxmap(**kwargs)
+    return smap,smap.draw_hpxmap(hpxmap,**kwargs)
 
 def draw_bliss(hpxmap,**kwargs):
     """ Draw BLISS footprint:
@@ -261,15 +227,16 @@ def draw_delve(hpxmap,**kwargs):
     vec = hp.ang2vec(180, -30, lonlat=True)
     pix = hp.query_disc(nside, vec, np.radians(1.0))
     val = hpxmap[pix]
-    kw = dict(meridians=False, parallels=False)
+    # Need to handle masked and unmasked arrays; so convert to ma
+    val = np.ma.masked_invalid(np.ma.masked_values(val, hp.UNSEEN))
 
-    if np.isnan(val).all() or (val == hp.UNSEEN).all():
+    kw = dict(meridians=False, parallels=False)
+    if val.mask.all():
         kw['lon_0'] = kwargs.get('lon_0',0)
-        smap = SurveyMcBryde(**kw)
     else:
         kw['lon_0'] = kwargs.get('lon_0',180)
-        smap = SurveyMcBryde(**kw)
 
+    smap = SurveyMcBryde(**kw)
     smap.draw_meridians(fontsize=10)
     smap.draw_parallels(fontsize=10)
 

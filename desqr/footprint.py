@@ -10,7 +10,7 @@ from multiprocessing import Pool
 import functools
 
 import matplotlib
-if os.getenv('TERM')=='screen' or not os.getenv('DISPLAY'):
+if os.getenv('TERM').startswith('screen') or not os.getenv('DISPLAY'):
     matplotlib.use('Agg')
 from matplotlib.colors import LogNorm
 import pylab as plt
@@ -21,24 +21,43 @@ import yaml
 import healpy as hp
 import fitsio
 
-from const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
-from utils import bfield, bfields, load_infiles, mkdir
-from utils import empty, blank, unseen
-import utils
-import plotting
+from desqr import utils
+from desqr import plotting
+from desqr.const import OBJECT_ID, UNIQUE_ID, BANDS, BADMAG, NSIDES
+from desqr.utils import bfield, bfields, load_infiles, mkdir
+from desqr.utils import empty, blank, unseen
 
-MAGVAR = 'WAVG_MAG_PSF'
+#MAGVAR = 'WAVG_MAG_PSF'
+MAGVAR = 'MAG_AUTO'
 EXTVAR = 'EXTENDED_CLASS'
 REDVAR = 'EXTINCTION'
 
 # band-dependent magnitude limit
 MAGLIM = odict([
-    ['g',23.0],
-    ['r',23.0],
+    ['g',23.5],
+    ['r',23.3],
     ['i',22.5], # was 22.0
     ['z',22.0],
     ['Y',21.0],
 ])
+
+## SNR > 100 maglim
+#MAGLIM = odict([
+#    ['g',20.0],
+#    ['r',19.5],
+#    ['i',18.5], 
+#    ['z',18.5],
+#    ['Y',17.0],
+#])
+
+## any viable magnitude (i.e., detection)
+#MAGLIM = odict([
+#    ['g', [10, 30] ],
+#    ['r', [10, 30] ],
+#    ['i', [10, 30] ], 
+#    ['z', [10, 30] ],
+#    ['Y', [10, 30] ],
+#])
 
 # star-galaxy classification
 EXTCLASS = odict([
@@ -50,9 +69,9 @@ EXTCLASS = odict([
 
 # color cuts (if color not in this list, selects all)
 COLOR = odict([
-    # [color, [[cmin, cmax], [mmin, mmax]] ]
-    ['gr', [[0.1,0.3], [17,20]] ],
-    ['gi', [[0.2,0.4], [17,20]] ],
+    # [color, [ [cmin, cmax], [mmin, mmax]] ]
+    ['gr', [ [0.1,0.3], [17,20]] ],
+    ['gi', [ [0.2,0.4], [17,20]] ],
 ])
 
 # Coverage Footprint
@@ -79,8 +98,8 @@ def select_mag(data, var, mag_range=None):
     -------
     selection
     """
-    # NOOP; select everything
     if mag_range is None:
+        # NOOP; select everything
         return np.ones(len(data), dtype=bool)
     elif np.isscalar(mag_range):
         return data[var] < mag_range
@@ -129,7 +148,6 @@ def select_class(data, var, values):
         return np.ones(len(data), dtype=bool)
     else:
         return np.in1d(data[var], values)
-
 
 def selection_function(data, bands, mag=True, color=False, extclass=None):
     """ Build a function to do a specific selection on mag and class.
@@ -191,7 +209,16 @@ def count(filename, deredden=False):
     ret : dict with [pix,cts] for each selection
     """
     print(filename)
-    data = fitsio.read(filename,columns=COLUMNS)
+
+    # Empty return array
+    ret = {k: [np.array([],dtype=int),np.array([])] for k in skymaps.keys()}
+    
+    try:
+        data = fitsio.read(filename,columns=COLUMNS)
+    except OSError as e:
+        nrows = fitsio.FITS(filename)[1].get_nrows()
+        if nrows == 0: return ret
+        else: raise(e)
 
     # Deredden the magnitudes
     if deredden:
@@ -200,7 +227,6 @@ def count(filename, deredden=False):
             data[c] = data[c] - data[bfield(EXTVAR,c[-1])]
 
     pixels = hp.ang2pix(nside,data['RA'],data['DEC'],lonlat=True)
-    ret = dict()
     for name,(selfn,counts) in skymaps.items():
         pix,cts = np.unique(pixels[selfn(data)],return_counts=True)
         ret[name] = [pix,cts]
@@ -210,7 +236,7 @@ def plot_footprint(filename,outfile=None,survey='delve',log=False):
     """ Plot the object density over the footprint """
     print("Reading %s..."%filename)
 
-    counts = hp.read_map(filename,verbose=False)
+    counts = hp.read_map(filename)
     nside = hp.get_nside(counts)
     pixarea = hp.nside2pixarea(nside,degrees=True)*3600 #arcmin2
     hpxmap = counts/pixarea
@@ -233,8 +259,8 @@ def plot_footprint(filename,outfile=None,survey='delve',log=False):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('config',help='configuration file')
-    parser.add_argument('-b','--band',dest='bands',action='append',default=None)
+    parser.add_argument('configfile',help='config file')
+    parser.add_argument('-b','--bands',action='append',default=None)
     parser.add_argument('-c','--color',action='store_true')
     parser.add_argument('-d','--deredden',action='store_true')
     parser.add_argument('-e','--extclass',default=None,choices=['star','gal'])
@@ -246,7 +272,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    config = yaml.safe_load(open(args.config))
+    config = yaml.safe_load(open(args.configfile))
     nside = args.nside
     survey = config['survey']
     catdir = config['catdir']
@@ -265,6 +291,7 @@ if __name__ == "__main__":
 
     print("Preparing to count objects...")
     print("  bands: %s"%args.bands)
+    print("  maglim: %s"%args.mag)
     print("  color: %s"%args.color)
     print("  extclass: %s"%args.extclass)
     print("  deredden: %s"%args.deredden)
@@ -273,16 +300,16 @@ if __name__ == "__main__":
     print("  columns: %s"%COLUMNS)
 
     skymaps = odict()
-    for i,k in enumerate(args.bands):
-        print("Adding %s-band selection..."%k)
-        #skymaps[k] = [SELECT[k], empty(nside)]
-        #fn = selection_function(k, extclass=EXTCLASS[args.extclass])
-        kwargs = dict(bands=k, mag=args.mag, color=args.color, extclass=args.extclass)
-        fn = functools.partial(selection_function, **kwargs)
-        skymaps[k] = [fn, empty(nside)]
+    for i, b in enumerate(args.bands):
+        print("Adding %s-band selection..."%b)
+        #skymaps[b] = [SELECT[b], empty(nside)]
+        #fn = selection_function(b, extclass=EXTCLASS[args.extclass])
+        kwargs = dict(bands=b, mag=args.mag, color=args.color, extclass=args.extclass)
+        func = functools.partial(selection_function, **kwargs)
+        skymaps[b] = [func, empty(nside)]
             
-    filenames = sorted(glob.glob(catdir+'/cat_hpx_*.fits'))
-    #filenames = filenames[:2000]
+    filenames = sorted(glob.glob(catdir+'/*_*.fits'))
+    #filenames = filenames[:100]
     print("Processing %i files..."%len(filenames))
 
     # Launch the jobs

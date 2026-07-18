@@ -98,7 +98,7 @@ dzero = gcm['MAG_ZERO']-qslr['MAG_ZERO']
 sep = angsep(gcm['RA'],gcm['DEC'],qslr['RA_MEAN'],qslr['DEC_MEAN'])
 
 plt.figure()
-plotting.draw_hist(dzero,normed=False)
+plotting.draw_peak_hist(dzero,normed=False)
 plt.legend(loc='upper right')
 plt.xlabel(r'${\rm ZP_{GCM} - ZP_{qSLR}}')
 plt.ylabel("Number of CCDs")
@@ -147,7 +147,7 @@ for name,(b1,b2) in COLORS:
 
 
     plt.figure()
-    im = plotting.draw_hist(skymap[~np.isnan(skymap)])
+    im = plotting.draw_peak_hist(skymap[~np.isnan(skymap)])
     plt.title('Color Offset (%s)'%(name))
     plt.xlabel(r'${\rm (%s)_{GCM} - (%s)_{qSLR}}$'%(name,name))
     plt.ylabel('Normalized Number of CCDs')

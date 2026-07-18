@@ -16,8 +16,6 @@ import fitsio
 
 import astropy.wcs
 import pylab as plt
-try:                import healpix 
-except ImportError: from ugali.utils import healpix
 
 EDGE = 8192
 DATADIR = '/data/des40.b/data/cfhtlens/w4/mask'
